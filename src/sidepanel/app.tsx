@@ -1,15 +1,25 @@
-import { useEffect, useId, useState, startTransition, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  startTransition,
+  type ReactNode
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { Camera } from "lucide-react";
 import { createId } from "@/shared/ids";
 import { extensionMessageSchema, type ExtensionMessage } from "@/shared/messages";
 import { rootStorageSchema, storedScreenshotSchema, workflowSchema } from "@/shared/schemas";
 import { nowIso } from "@/shared/time";
 import type { RootStorage, StoredScreenshot, Workflow, WorkflowStep } from "@/shared/types";
+import { useAutoScroll } from "./useAutoScroll";
+import { useForm } from "react-hook-form";
 
 type SessionViewState =
   | "idle"
@@ -60,6 +70,16 @@ async function fileToStoredScreenshot(file: File): Promise<StoredScreenshot> {
     dataUrl,
     createdAt: nowIso()
   });
+}
+
+function getImageFileFromClipboard(clipboardData: DataTransfer | null): File | null {
+  if (!clipboardData) return null;
+
+  const imageItem = Array.from(clipboardData.items).find((item) =>
+    item.type.startsWith("image/")
+  );
+
+  return imageItem?.getAsFile() ?? null;
 }
 
 function formatActionLabel(action: WorkflowStep["action"]): string {
@@ -187,13 +207,23 @@ function FieldLabel({
 
 export function App() {
   const [storageState, setStorageState] = useState<RootStorage>(createEmptyState);
-  const [workflowName, setWorkflowName] = useState("");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [failureNotes, setFailureNotes] = useState("");
-  const [pendingScreenshot, setPendingScreenshot] = useState<StoredScreenshot | null>(null);
+  const [isAttachingScreenshot, setIsAttachingScreenshot] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const screenshotInputId = useId();
+  const stepsBottomRef = useRef<HTMLDivElement | null>(null);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors }
+  } = useForm<{ workflowName: string }>({
+    defaultValues: {
+      workflowName: ""
+    }
+  });
 
   const currentWorkflow = storageState.currentWorkflowId
     ? storageState.workflowsById[storageState.currentWorkflowId]
@@ -206,6 +236,8 @@ export function App() {
   const isRecording = sessionViewState === "recording";
   const missingDescriptionCount =
     currentWorkflow?.steps.filter((step) => step.description.trim().length === 0).length ?? 0;
+
+  useAutoScroll(stepsBottomRef.current, currentWorkflow?.steps.length ?? 0);
 
   async function refreshState() {
     const response = await sendMessage({ type: "GET_STATE" });
@@ -250,13 +282,97 @@ export function App() {
   useEffect(() => {
     setDescription(selectedStep?.description ?? "");
     setFailureNotes(selectedStep?.failureNotes ?? "");
-    setPendingScreenshot(null);
   }, [selectedStepId, selectedStep?.description, selectedStep?.failureNotes]);
 
   function resetSelectedStepDraft() {
     setDescription(selectedStep?.description ?? "");
     setFailureNotes(selectedStep?.failureNotes ?? "");
-    setPendingScreenshot(null);
+  }
+
+  async function handleDeleteStep() {
+    if (!currentWorkflow || !selectedStep) return;
+
+    setSessionError(null);
+
+    const currentIndex = currentWorkflow.steps.findIndex((step) => step.id === selectedStep.id);
+    const fallbackStep =
+      currentWorkflow.steps[currentIndex + 1] ??
+      currentWorkflow.steps[currentIndex - 1] ??
+      null;
+
+    await sendMessage({
+      type: "DELETE_STEP",
+      workflowId: currentWorkflow.id,
+      stepId: selectedStep.id
+    });
+
+    setSelectedStepId(fallbackStep?.id ?? null);
+    setDescription("");
+    setFailureNotes("");
+    await refreshState();
+  }
+
+  async function attachScreenshotToSelectedStep(screenshot: StoredScreenshot) {
+    if (!currentWorkflow || !selectedStep) return;
+
+    setSessionError(null);
+    setIsAttachingScreenshot(true);
+
+    try {
+      const response = await sendMessage({
+        type: "ATTACH_SCREENSHOT",
+        workflowId: currentWorkflow.id,
+        stepId: selectedStep.id,
+        screenshot
+      });
+
+      if (!response) {
+        setSessionError("Screenshot could not be attached.");
+      }
+    } finally {
+      setIsAttachingScreenshot(false);
+      await refreshState();
+    }
+  }
+
+  async function handleCaptureScreenshot() {
+    if (!currentWorkflow || !selectedStep) return;
+
+    const tabId = await getActiveTabId();
+    if (tabId == null) {
+      setSessionError("No active browser tab is available for screenshot capture.");
+      return;
+    }
+
+    setSessionError(null);
+    setIsAttachingScreenshot(true);
+
+    try {
+      const response = await sendMessage({
+        type: "CAPTURE_SCREENSHOT",
+        workflowId: currentWorkflow.id,
+        stepId: selectedStep.id,
+        tabId
+      });
+
+      if (
+        typeof response === "object" &&
+        response !== null &&
+        "ok" in response &&
+        response.ok === false &&
+        "error" in response &&
+        typeof response.error === "string"
+      ) {
+        setSessionError(response.error);
+      }
+    } finally {
+      setIsAttachingScreenshot(false);
+      await refreshState();
+    }
+  }
+
+  async function handleScreenshotFile(file: File) {
+    await attachScreenshotToSelectedStep(await fileToStoredScreenshot(file));
   }
 
   function getStartErrorMessage(response: unknown): string | null {
@@ -285,8 +401,8 @@ export function App() {
     return "Recording could not start in this tab.";
   }
 
-  async function handleCreateWorkflow() {
-    const trimmed = workflowName.trim();
+  async function handleCreateWorkflow(values: { workflowName: string }) {
+    const trimmed = values.workflowName.trim();
     if (!trimmed) return;
 
     const createdWorkflow = workflowSchema.parse(
@@ -306,7 +422,7 @@ export function App() {
     });
     setSessionError(getStartErrorMessage(startResponse));
 
-    setWorkflowName("");
+    reset({ workflowName: "" });
     await refreshState();
   }
 
@@ -378,15 +494,6 @@ export function App() {
       }
     });
 
-    if (pendingScreenshot) {
-      await sendMessage({
-        type: "ATTACH_SCREENSHOT",
-        workflowId: currentWorkflow.id,
-        stepId: selectedStep.id,
-        screenshot: pendingScreenshot
-      });
-    }
-
     await refreshState();
   }
 
@@ -398,13 +505,34 @@ export function App() {
       type: "DELETE_WORKFLOW",
       workflowId: currentWorkflow.id
     });
-    setWorkflowName("");
+    reset({ workflowName: "" });
     setSelectedStepId(null);
     setDescription("");
     setFailureNotes("");
-    setPendingScreenshot(null);
     await refreshState();
   }
+
+  useEffect(() => {
+    if (!selectedStep || !currentWorkflow) {
+      return;
+    }
+
+    const handleGlobalPaste = (event: ClipboardEvent) => {
+      const file = getImageFileFromClipboard(event.clipboardData);
+      if (!file) {
+        return;
+      }
+
+      event.preventDefault();
+      void handleScreenshotFile(file);
+    };
+
+    document.addEventListener("paste", handleGlobalPaste);
+
+    return () => {
+      document.removeEventListener("paste", handleGlobalPaste);
+    };
+  }, [currentWorkflow, selectedStep]);
 
   return (
     <div className="grain min-h-screen bg-transparent px-4 py-5 text-[color:var(--foreground)]">
@@ -478,19 +606,31 @@ export function App() {
             ) : null}
 
             {sessionViewState === "idle" ? (
-              <div className="space-y-3">
+              <form className="space-y-3" onSubmit={handleSubmit(handleCreateWorkflow)} noValidate>
                 <div className="space-y-1.5">
                   <FieldLabel>Workflow Name</FieldLabel>
                   <Input
+                    aria-invalid={errors.workflowName ? "true" : "false"}
+                    className={cn(
+                      errors.workflowName &&
+                        "border-[color:var(--error-border)] focus-visible:border-[color:var(--error-border)] focus-visible:shadow-[0_0_0_3px_rgba(167,54,31,0.12)]"
+                    )}
                     placeholder="Login and submit support ticket"
-                    value={workflowName}
-                    onChange={(event) => setWorkflowName(event.target.value)}
+                    {...register("workflowName", {
+                      validate: (value) =>
+                        value.trim().length > 0 || "You need to enter a workflow name before recording."
+                    })}
                   />
+                  {errors.workflowName ? (
+                    <p className="[font-family:var(--font-serif)] text-[13px] leading-[1.5] text-[color:var(--error)]">
+                      {errors.workflowName.message}
+                    </p>
+                  ) : null}
                 </div>
-                <Button className="w-full" onClick={handleCreateWorkflow}>
+                <Button className="w-full" type="submit">
                   Create Workflow
                 </Button>
-              </div>
+              </form>
             ) : null}
 
             {sessionViewState === "draft" ? (
@@ -541,7 +681,8 @@ export function App() {
             </CardDescription>
           </CardHeader>
           <CardContent className="py-4">
-            <div className="max-h-[34vh] space-y-1.5 overflow-y-auto">
+            <div className="max-h-[34vh] overflow-y-auto">
+              <div className="space-y-1.5">
               {currentWorkflow?.steps.length ? (
                 currentWorkflow.steps.map((step) => (
                   <button
@@ -600,6 +741,8 @@ export function App() {
                   </p>
                 </div>
               )}
+                <div ref={stepsBottomRef} aria-hidden="true" className="h-px" />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -652,6 +795,18 @@ export function App() {
 
                 <div className="space-y-1.5">
                   <FieldLabel optional>Screenshot</FieldLabel>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isAttachingScreenshot}
+                      onClick={() => void handleCaptureScreenshot()}
+                    >
+                      <Camera className="size-3.5" />
+                      {isAttachingScreenshot ? "Capturing..." : "Capture Current Tab"}
+                    </Button>
+                  </div>
                   <input
                     id={screenshotInputId}
                     type="file"
@@ -659,38 +814,52 @@ export function App() {
                     className="sr-only"
                     onChange={async (event) => {
                       const file = event.target.files?.[0];
-                      if (!file) {
-                        setPendingScreenshot(null);
-                        return;
-                      }
-
-                      setPendingScreenshot(await fileToStoredScreenshot(file));
+                      event.currentTarget.value = "";
+                      if (!file) return;
+                      await handleScreenshotFile(file);
                     }}
                   />
-                  <label
-                    htmlFor={screenshotInputId}
-                    className="block cursor-pointer rounded-[14px] border-[1.5px] border-dashed border-[rgba(62,46,31,0.2)] px-5 py-5 text-center transition-colors hover:border-[rgba(218,108,67,0.3)] hover:bg-[rgba(218,108,67,0.03)]"
+                  <div
+                    tabIndex={0}
+                    onPaste={(event) => {
+                      const file = getImageFileFromClipboard(event.clipboardData);
+                      if (!file) return;
+                      event.preventDefault();
+                      void handleScreenshotFile(file);
+                    }}
+                    className="rounded-[14px] border-[1.5px] border-dashed border-[rgba(62,46,31,0.2)] px-5 py-5 text-center transition-colors hover:border-[rgba(218,108,67,0.3)] hover:bg-[rgba(218,108,67,0.03)] focus-visible:border-[rgba(218,108,67,0.35)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(218,108,67,0.12)]"
                   >
-                    <p className="text-[13px] italic text-[color:var(--muted-foreground)]">
-                      Drop a screenshot here, or click to attach
-                    </p>
-                    <p className="[font-family:var(--font-mono)] mt-1 text-[10px] tracking-[0.1em] text-[rgba(119,106,93,0.55)]">
-                      PNG · JPG · WEBP
-                    </p>
-                  </label>
-                  {pendingScreenshot ? (
+                    <label htmlFor={screenshotInputId} className="block cursor-pointer">
+                      <p className="text-[13px] italic text-[color:var(--muted-foreground)]">
+                        Paste an image here, or click to upload
+                      </p>
+                      <p className="[font-family:var(--font-mono)] mt-1 text-[10px] tracking-[0.1em] text-[rgba(119,106,93,0.55)]">
+                        PNG · JPG · WEBP
+                      </p>
+                    </label>
+                  </div>
+                  {selectedScreenshot ? (
+                    <div className="space-y-2">
+                      <div className="overflow-hidden rounded-[12px] border border-[color:var(--line)] bg-[color:var(--background)]">
+                        <img
+                          src={selectedScreenshot.dataUrl}
+                          alt={selectedScreenshot.name}
+                          className="max-h-44 w-full object-cover"
+                        />
+                      </div>
+                      <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
+                        Attached · {selectedScreenshot.name}
+                      </p>
+                    </div>
+                  ) : isAttachingScreenshot ? (
                     <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                      Pending attachment · {pendingScreenshot.name}
-                    </p>
-                  ) : selectedScreenshot ? (
-                    <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                      Attached · {selectedScreenshot.name}
+                      Attaching screenshot...
                     </p>
                   ) : null}
                 </div>
 
                 <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="ghost" onClick={resetSelectedStepDraft}>
+                  <Button variant="ghost" onClick={handleDeleteStep}>
                     Discard
                   </Button>
                   <Button onClick={handleSaveStep}>Save Step</Button>

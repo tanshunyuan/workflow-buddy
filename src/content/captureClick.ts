@@ -1,15 +1,25 @@
 import { nowIso } from "../shared/time.js";
 import { workflowStepDraftSchema } from "../shared/schemas.js";
 import type { WorkflowStepDraft } from "../shared/types.js";
-import { getElementHtml, isElement } from "./dom.js";
+import { getCapturedElementHtml, getClickCaptureElement, isElement } from "./dom.js";
 
 export function createClickStep(target: EventTarget | null): WorkflowStepDraft | null {
   if (!isElement(target)) return null;
+  return createClickStepFromElement(getClickCaptureElement(target));
+}
+
+export function createClickStepFromElement(element: Element | null): WorkflowStepDraft | null {
+  if (!element) return null;
+  return createClickStepFromHtml(getCapturedElementHtml(element));
+}
+
+export function createClickStepFromHtml(elementHtml: string | null): WorkflowStepDraft | null {
+  if (!elementHtml) return null;
 
   return workflowStepDraftSchema.parse({
     action: "click",
     timestamp: nowIso(),
     pageUrl: window.location.href,
-    elementHtml: getElementHtml(target)
+    elementHtml
   });
 }

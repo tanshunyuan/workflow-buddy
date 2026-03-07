@@ -1,9 +1,13 @@
+import { createId } from "../shared/ids.js";
 import { extensionMessageSchema } from "../shared/messages.js";
+import { storedScreenshotSchema } from "../shared/schemas.js";
+import { nowIso } from "../shared/time.js";
 import {
   appendStep,
   attachScreenshot,
   clearCurrentWorkflow,
   createWorkflow,
+  deleteStep,
   deleteWorkflow,
   getState,
   startRecording,
@@ -66,6 +70,80 @@ async function ensureContentScriptReady(tabId: number): Promise<{ ok: true } | {
     ok: false,
     error: "The recorder could not attach to this tab. Refresh the page and try again."
   };
+}
+
+function toSafeFileSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "workflow";
+}
+
+function buildScreenshotName(workflowName: string, stepIndex: number): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${toSafeFileSegment(workflowName)}-step-${String(stepIndex).padStart(2, "0")}-${stamp}.png`;
+}
+
+async function captureScreenshotForStep(
+  workflowId: string,
+  stepId: string,
+  tabId: number
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+  if (!workflow) {
+    return { ok: false, error: "Workflow not found." };
+  }
+
+  const step = workflow.steps.find((item) => item.id === stepId);
+  if (!step) {
+    return { ok: false, error: "Step not found." };
+  }
+
+  if (workflow.tabId != null && workflow.tabId !== tabId) {
+    return {
+      ok: false,
+      error: "Switch back to the recorded tab before capturing a screenshot."
+    };
+  }
+
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return { ok: false, error: "The recorded tab is no longer available." };
+  }
+
+  if (!tab.active) {
+    return {
+      ok: false,
+      error: "Activate the recorded tab before capturing a screenshot."
+    };
+  }
+
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    const screenshot = storedScreenshotSchema.parse({
+      id: createId("shot"),
+      name: buildScreenshotName(workflow.name, step.index),
+      mimeType: "image/png",
+      dataUrl,
+      createdAt: nowIso()
+    });
+
+    const attachedStep = await attachScreenshot(workflowId, stepId, screenshot);
+    if (!attachedStep) {
+      return { ok: false, error: "Screenshot could not be attached." };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Screenshot capture failed."
+    };
+  }
 }
 
 async function exportWorkflow(workflowId: string): Promise<void> {
@@ -161,6 +239,18 @@ chrome.runtime.onMessage.addListener((
         sendResponse(nextState);
         return;
       }
+      case "DELETE_STEP": {
+        const workflow = await deleteStep(safeMessage.workflowId, safeMessage.stepId);
+        if (!workflow) {
+          sendResponse({ ok: false, error: "Workflow not found." });
+          return;
+        }
+
+        const nextState = await getState();
+        syncRecordingSessionActor(nextState);
+        sendResponse({ ok: true, workflow });
+        return;
+      }
       case "START_RECORDING": {
         if (!canStartRecording()) {
           sendResponse({ ok: false, error: "Recording can only start from a draft or completed workflow." });
@@ -232,6 +322,10 @@ chrome.runtime.onMessage.addListener((
       }
       case "UPDATE_STEP": {
         sendResponse(await updateStep(safeMessage.workflowId, safeMessage.stepId, safeMessage.patch));
+        return;
+      }
+      case "CAPTURE_SCREENSHOT": {
+        sendResponse(await captureScreenshotForStep(safeMessage.workflowId, safeMessage.stepId, safeMessage.tabId));
         return;
       }
       case "ATTACH_SCREENSHOT": {

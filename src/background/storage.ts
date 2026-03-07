@@ -70,6 +70,28 @@ export async function deleteWorkflow(workflowId: string): Promise<RootStorage> {
   return state;
 }
 
+export async function deleteStep(workflowId: string, stepId: string): Promise<Workflow | null> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+  if (!workflow) return null;
+
+  const stepIndex = workflow.steps.findIndex((item) => item.id === stepId);
+  if (stepIndex === -1) return workflow;
+
+  const [removedStep] = workflow.steps.splice(stepIndex, 1);
+  if (removedStep?.screenshotId) {
+    delete state.screenshotsById[removedStep.screenshotId];
+  }
+
+  workflow.steps = workflow.steps.map((step, index) => ({
+    ...step,
+    index: index + 1
+  }));
+  workflow.updatedAt = nowIso();
+  await saveState(state);
+  return workflow;
+}
+
 export async function startRecording(workflowId: string, tabId: number): Promise<Workflow | null> {
   const state = await getState();
   const workflow = state.workflowsById[workflowId];
