@@ -4,6 +4,13 @@ Workflow Buddy is a Chrome extension for capturing a browser workflow once and e
 
 It helps a user document a workflow by capturing ordered browser steps, raw target HTML, optional screenshots, and user-written context that another LLM can later turn into automation.
 
+## Screenshots
+
+![main-panel.png](assets/images/main-panel.png)
+![step-panel.png](assets/images/step-panel.png)
+![step-panel-expanded.png](assets/images/step-panel-expanded.png)
+
+
 ## Features
 
 - Chrome extension only
