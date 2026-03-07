@@ -9,3 +9,9 @@
 - Ran `npm run check` successfully.
 - Tightened click dedupe again to use normalized control HTML and strip transient Ant wave markup before storage.
 - Rebuilt the extension bundle with `npm run build`.
+- Audited the side panel against the new floating-annotation prototype and confirmed the app still uses a separate step editor card.
+- Confirmed the existing background/storage messages already support implicit-save annotation changes without schema updates.
+- Replaced the side-panel step editor with an anchored floating annotation card that keeps the step list visible.
+- Added implicit save on outside click, `Escape`, `Cmd/Ctrl+Enter`, and active-row re-click, while keeping screenshot capture/upload flows in place.
+- Updated the technical and design docs to describe the floating annotation model.
+- Ran `npm run check` and `npm run build` after the rewrite.

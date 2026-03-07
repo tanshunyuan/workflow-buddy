@@ -1,7 +1,7 @@
 # Findings
 
-- The current click recorder listens on `document` in the capture phase and immediately records `createClickStep(event.target)`.
-- `createClickStep()` stores `elementHtml` as `target.outerHTML`, so composite controls can produce multiple steps from one user interaction.
-- Ant Design radio-button markup uses a `label` wrapper plus an inner `input[type="radio"]` and visual content node, which explains the duplicate recorded steps.
-- Resolving click capture to a canonical control element and deduping repeated events in a short time window preserves one-step-per-action without changing the storage model.
-- Ant Design also injects transient wave markup after click, which changes the control `outerHTML` and can bypass naive dedupe unless the snapshot is normalized first.
+- The current side panel already has the warning/error color tokens in `src/sidepanel/index.css`, but the main annotation flow still lives in a separate `Step Editor` card in `src/sidepanel/app.tsx`.
+- Step selection is single-state only: clicking a row highlights it and populates editor-local React state, but there is no anchored overlay, row dimming, or implicit save behavior.
+- The existing message/storage layer is sufficient for the redesign: `UPDATE_STEP`, `ATTACH_SCREENSHOT`, and `CAPTURE_SCREENSHOT` already cover description, failure notes, and screenshot updates without schema changes.
+- Current primary action styling already supports dark-ink buttons and terracotta stop buttons through the shared `Button` variants, so the main visual work is in step-row chips and annotation affordances.
+- Technical docs still describe a per-step editor, so implementation and docs are currently out of sync.

@@ -4,6 +4,57 @@ import { rootStorageSchema, storedScreenshotSchema, workflowSchema, workflowStep
 import type { RootStorage, StoredScreenshot, Workflow, WorkflowStep, WorkflowStepDraft, WorkflowStepPatch } from "../shared/types.js";
 
 const STORAGE_KEY = "workflowBuddyState";
+const recentDuplicateClickWindowMs = 500;
+
+interface HashableStepPayload {
+  action: WorkflowStepDraft["action"];
+  pageUrl: string;
+  elementHtml: string;
+  typedValue?: string;
+}
+
+async function hashStepPayload(payload: HashableStepPayload): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(payload));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function parseTimestamp(timestamp: string): number | null {
+  const value = Date.parse(timestamp);
+  return Number.isNaN(value) ? null : value;
+}
+
+async function isRecentDuplicateClickStep(previousStep: WorkflowStep | undefined, nextStep: WorkflowStepDraft): Promise<boolean> {
+  if (!previousStep || previousStep.action !== "click" || nextStep.action !== "click") {
+    return false;
+  }
+
+  const previousTimestamp = parseTimestamp(previousStep.timestamp);
+  const nextTimestamp = parseTimestamp(nextStep.timestamp);
+  if (previousTimestamp == null || nextTimestamp == null) {
+    return false;
+  }
+
+  if (Math.abs(nextTimestamp - previousTimestamp) > recentDuplicateClickWindowMs) {
+    return false;
+  }
+
+  const [previousHash, nextHash] = await Promise.all([
+    hashStepPayload({
+      action: previousStep.action,
+      pageUrl: previousStep.pageUrl,
+      elementHtml: previousStep.elementHtml
+    }),
+    hashStepPayload({
+      action: nextStep.action,
+      pageUrl: nextStep.pageUrl,
+      elementHtml: nextStep.elementHtml
+    })
+  ]);
+
+  return previousHash === nextHash;
+}
 
 function createEmptyState(): RootStorage {
   return rootStorageSchema.parse({
@@ -124,6 +175,10 @@ export async function appendStep(workflowId: string, draft: WorkflowStepDraft): 
   if (!workflow) return null;
 
   const safeDraft = workflowStepDraftSchema.parse(draft);
+  if (await isRecentDuplicateClickStep(workflow.steps.at(-1), safeDraft)) {
+    return null;
+  }
+
   const step = workflowStepSchema.parse({
     id: createId("step"),
     index: workflow.steps.length + 1,

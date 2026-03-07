@@ -1,7 +1,7 @@
 import { extensionMessageSchema, type ExtensionMessage } from "../shared/messages.js";
 import { createClickStepFromHtml } from "./captureClick.js";
 import { cacheStartingValue, createTypeStep } from "./captureType.js";
-import { getCapturedElementHtml, getClickCaptureElement, isElement } from "./dom.js";
+import { getCapturedElementHtml, resolveClickCaptureElement } from "./dom.js";
 
 declare global {
   interface Window {
@@ -76,9 +76,9 @@ function flushPendingClickCapture(): void {
 
 function handleClick(event: MouseEvent): void {
   if (!isCaptureEnabled || !activeWorkflowId) return;
-  if (!isElement(event.target)) return;
+  const captureElement = resolveClickCaptureElement(event);
+  if (!captureElement) return;
 
-  const captureElement = getClickCaptureElement(event.target);
   const captureHtml = getCapturedElementHtml(captureElement);
   const captureKey = captureHtml;
   if (
