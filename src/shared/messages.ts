@@ -3,7 +3,10 @@ import { storedScreenshotSchema, workflowStepDraftSchema, workflowStepPatchSchem
 
 export const extensionMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("GET_STATE") }),
+  z.object({ type: z.literal("PING") }),
   z.object({ type: z.literal("CREATE_WORKFLOW"), name: z.string().min(1) }),
+  z.object({ type: z.literal("CLEAR_CURRENT_WORKFLOW") }),
+  z.object({ type: z.literal("DELETE_WORKFLOW"), workflowId: z.string() }),
   z.object({ type: z.literal("START_RECORDING"), workflowId: z.string(), tabId: z.number().int() }),
   z.object({ type: z.literal("STOP_RECORDING"), workflowId: z.string() }),
   z.object({ type: z.literal("ENABLE_CAPTURE"), workflowId: z.string() }),

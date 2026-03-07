@@ -41,6 +41,35 @@ export async function createWorkflow(name: string): Promise<Workflow> {
   return workflow;
 }
 
+export async function clearCurrentWorkflow(): Promise<RootStorage> {
+  const state = await getState();
+  state.currentWorkflowId = null;
+  state.activeRecordingTabId = null;
+  await saveState(state);
+  return state;
+}
+
+export async function deleteWorkflow(workflowId: string): Promise<RootStorage> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+
+  if (!workflow) {
+    return state;
+  }
+
+  if (state.currentWorkflowId === workflowId) {
+    state.currentWorkflowId = null;
+  }
+
+  if (state.activeRecordingTabId != null && workflow.tabId === state.activeRecordingTabId) {
+    state.activeRecordingTabId = null;
+  }
+
+  delete state.workflowsById[workflowId];
+  await saveState(state);
+  return state;
+}
+
 export async function startRecording(workflowId: string, tabId: number): Promise<Workflow | null> {
   const state = await getState();
   const workflow = state.workflowsById[workflowId];

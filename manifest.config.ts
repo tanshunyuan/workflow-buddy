@@ -5,7 +5,7 @@ export default defineManifest({
   name: "Workflow Buddy",
   version: "0.1.0",
   description: "Record browser workflows as LLM-ready step documents.",
-  permissions: ["storage", "activeTab", "downloads", "sidePanel"],
+  permissions: ["storage", "activeTab", "downloads", "sidePanel", "scripting"],
   host_permissions: ["<all_urls>"],
   background: {
     service_worker: "src/background/index.ts"

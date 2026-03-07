@@ -43,9 +43,14 @@ document.addEventListener("click", handleClick, true);
 document.addEventListener("focusin", handleFocusIn, true);
 document.addEventListener("blur", handleBlur, true);
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const parsed = extensionMessageSchema.safeParse(message);
   if (!parsed.success) return;
+
+  if (parsed.data.type === "PING") {
+    sendResponse({ ok: true });
+    return;
+  }
 
   if (parsed.data.type === "ENABLE_CAPTURE") {
     isCaptureEnabled = true;

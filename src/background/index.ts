@@ -1,5 +1,15 @@
 import { extensionMessageSchema } from "../shared/messages.js";
-import { appendStep, attachScreenshot, createWorkflow, getState, startRecording, stopRecording, updateStep } from "./storage.js";
+import {
+  appendStep,
+  attachScreenshot,
+  clearCurrentWorkflow,
+  createWorkflow,
+  deleteWorkflow,
+  getState,
+  startRecording,
+  stopRecording,
+  updateStep
+} from "./storage.js";
 import { exportWorkflowToMarkdown } from "./exportMarkdown.js";
 
 async function configureSidePanelBehavior(): Promise<void> {
@@ -12,19 +22,67 @@ async function sendMessageToTab(tabId: number, message: unknown): Promise<void> 
   await chrome.tabs.sendMessage(tabId, message);
 }
 
+async function pingContentScript(tabId: number): Promise<boolean> {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "PING" });
+    return response?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureContentScriptReady(tabId: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (await pingContentScript(tabId)) {
+    return { ok: true };
+  }
+
+  const files = chrome.runtime.getManifest().content_scripts?.[0]?.js;
+  if (!files?.length) {
+    return { ok: false, error: "Recorder script is missing from the extension bundle." };
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files
+    });
+  } catch {
+    return {
+      ok: false,
+      error: "This page cannot be recorded automatically. Try a standard website tab instead."
+    };
+  }
+
+  if (await pingContentScript(tabId)) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    error: "The recorder could not attach to this tab. Refresh the page and try again."
+  };
+}
+
 async function exportWorkflow(workflowId: string): Promise<void> {
   const state = await getState();
   const workflow = state.workflowsById[workflowId];
-  if (!workflow) return;
+  if (!workflow) {
+    throw new Error("Workflow not found.");
+  }
 
   const markdown = exportWorkflowToMarkdown(workflow, state.screenshotsById);
-  const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }));
+  const safeFilename = `${(workflow.name || "workflow").replace(/[\\/:*?"<>|]/g, "-")}.md`;
+  const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
 
-  await chrome.downloads.download({
+  const downloadId = await chrome.downloads.download({
     url,
-    filename: `${workflow.name || "workflow"}.md`,
+    filename: safeFilename,
     saveAs: true
   });
+
+  if (typeof downloadId !== "number") {
+    throw new Error("Chrome did not start the download.");
+  }
 }
 
 void configureSidePanelBehavior();
@@ -60,12 +118,28 @@ chrome.runtime.onMessage.addListener((
         sendResponse(await createWorkflow(safeMessage.name));
         return;
       }
+      case "CLEAR_CURRENT_WORKFLOW": {
+        sendResponse(await clearCurrentWorkflow());
+        return;
+      }
+      case "DELETE_WORKFLOW": {
+        sendResponse(await deleteWorkflow(safeMessage.workflowId));
+        return;
+      }
       case "START_RECORDING": {
+        const readiness = await ensureContentScriptReady(safeMessage.tabId);
+        if (!readiness.ok) {
+          sendResponse(readiness);
+          return;
+        }
+
         const workflow = await startRecording(safeMessage.workflowId, safeMessage.tabId);
         if (workflow) {
           await sendMessageToTab(safeMessage.tabId, { type: "ENABLE_CAPTURE", workflowId: workflow.id });
+          sendResponse({ ok: true, workflow });
+          return;
         }
-        sendResponse(workflow);
+        sendResponse({ ok: false, error: "Workflow not found." });
         return;
       }
       case "STOP_RECORDING": {
@@ -89,8 +163,16 @@ chrome.runtime.onMessage.addListener((
         return;
       }
       case "EXPORT_WORKFLOW": {
-        await exportWorkflow(safeMessage.workflowId);
-        sendResponse({ ok: true });
+        try {
+          await exportWorkflow(safeMessage.workflowId);
+          await clearCurrentWorkflow();
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "Export failed."
+          });
+        }
         return;
       }
     }

@@ -5,12 +5,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { createId } from "@/shared/ids";
 import { extensionMessageSchema, type ExtensionMessage } from "@/shared/messages";
-import { rootStorageSchema, storedScreenshotSchema } from "@/shared/schemas";
+import { rootStorageSchema, storedScreenshotSchema, workflowSchema } from "@/shared/schemas";
 import { nowIso } from "@/shared/time";
-import type { RootStorage, StoredScreenshot } from "@/shared/types";
-import { Download, FileImage, PencilLine, Radio, SquareMousePointer } from "lucide-react";
+import type { RootStorage, StoredScreenshot, Workflow } from "@/shared/types";
+import { Download, FileImage, PencilLine, SquareMousePointer, StopCircle, Trash2 } from "lucide-react";
+
+type SessionViewState =
+  | "idle"
+  | "draft"
+  | "recording"
+  | "completed-empty"
+  | "completed-ready";
+
+function getSessionViewState(workflow: Workflow | undefined): SessionViewState {
+  if (!workflow) return "idle";
+  if (workflow.status === "draft") return "draft";
+  if (workflow.status === "recording") return "recording";
+  if (workflow.status === "completed" && workflow.steps.length === 0) return "completed-empty";
+  return "completed-ready";
+}
 
 function createEmptyState(): RootStorage {
   return rootStorageSchema.parse({
@@ -55,11 +71,15 @@ export function App() {
   const [description, setDescription] = useState("");
   const [failureNotes, setFailureNotes] = useState("");
   const [pendingScreenshot, setPendingScreenshot] = useState<StoredScreenshot | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   const currentWorkflow = storageState.currentWorkflowId
     ? storageState.workflowsById[storageState.currentWorkflowId]
     : undefined;
   const selectedStep = currentWorkflow?.steps.find((step) => step.id === selectedStepId);
+  const sessionViewState = getSessionViewState(currentWorkflow);
+  const isRecording = sessionViewState === "recording";
+  const isCompleted = sessionViewState === "completed-empty" || sessionViewState === "completed-ready";
 
   async function refreshState() {
     const response = await sendMessage({ type: "GET_STATE" });
@@ -107,32 +127,80 @@ export function App() {
     setPendingScreenshot(null);
   }, [selectedStepId, selectedStep?.description, selectedStep?.failureNotes]);
 
+  function getStartErrorMessage(response: unknown): string | null {
+    if (
+      typeof response === "object" &&
+      response !== null &&
+      "ok" in response &&
+      response.ok === true &&
+      "workflow" in response &&
+      workflowSchema.safeParse(response.workflow).success
+    ) {
+      return null;
+    }
+
+    if (
+      typeof response === "object" &&
+      response !== null &&
+      "ok" in response &&
+      response.ok === false &&
+      "error" in response &&
+      typeof response.error === "string"
+    ) {
+      return response.error;
+    }
+
+    return "Recording could not start in this tab.";
+  }
+
   async function handleCreateWorkflow() {
     const trimmed = workflowName.trim();
     if (!trimmed) return;
 
-    await sendMessage({ type: "CREATE_WORKFLOW", name: trimmed });
+    const createdWorkflow = workflowSchema.parse(
+      await sendMessage({ type: "CREATE_WORKFLOW", name: trimmed })
+    );
+
+    const tabId = await getActiveTabId();
+    if (tabId == null) {
+      setSessionError("No active browser tab is available for recording.");
+      return;
+    }
+
+    const startResponse = await sendMessage({
+      type: "START_RECORDING",
+      workflowId: createdWorkflow.id,
+      tabId
+    });
+    setSessionError(getStartErrorMessage(startResponse));
+
     setWorkflowName("");
     await refreshState();
   }
 
-  async function handleStartRecording() {
-    if (!currentWorkflow) return;
+  async function handleStartRecording(workflowOverride?: Workflow) {
+    const workflow = workflowOverride ?? currentWorkflow;
+    if (!workflow) return;
 
     const tabId = await getActiveTabId();
-    if (tabId == null) return;
+    if (tabId == null) {
+      setSessionError("No active browser tab is available for recording.");
+      return;
+    }
 
-    await sendMessage({
+    const startResponse = await sendMessage({
       type: "START_RECORDING",
-      workflowId: currentWorkflow.id,
+      workflowId: workflow.id,
       tabId
     });
+    setSessionError(getStartErrorMessage(startResponse));
     await refreshState();
   }
 
   async function handleStopRecording() {
     if (!currentWorkflow) return;
 
+    setSessionError(null);
     await sendMessage({
       type: "STOP_RECORDING",
       workflowId: currentWorkflow.id
@@ -143,15 +211,31 @@ export function App() {
   async function handleExport() {
     if (!currentWorkflow) return;
 
-    await sendMessage({
+    setSessionError(null);
+    const exportResponse = await sendMessage({
       type: "EXPORT_WORKFLOW",
       workflowId: currentWorkflow.id
     });
+
+    if (
+      typeof exportResponse === "object" &&
+      exportResponse !== null &&
+      "ok" in exportResponse &&
+      exportResponse.ok === false &&
+      "error" in exportResponse &&
+      typeof exportResponse.error === "string"
+    ) {
+      setSessionError(exportResponse.error);
+      return;
+    }
+
+    await refreshState();
   }
 
   async function handleSaveStep() {
     if (!currentWorkflow || !selectedStep) return;
 
+    setSessionError(null);
     await sendMessage({
       type: "UPDATE_STEP",
       workflowId: currentWorkflow.id,
@@ -174,56 +258,107 @@ export function App() {
     await refreshState();
   }
 
+  async function handleDiscardWorkflow() {
+    if (!currentWorkflow) return;
+
+    setSessionError(null);
+    await sendMessage({
+      type: "DELETE_WORKFLOW",
+      workflowId: currentWorkflow.id
+    });
+    setWorkflowName("");
+    setSelectedStepId(null);
+    setDescription("");
+    setFailureNotes("");
+    setPendingScreenshot(null);
+    await refreshState();
+  }
+
   return (
     <div className="grain min-h-screen p-4 text-[color:var(--foreground)]">
-      <div className="flex items-start justify-between gap-4 rounded-[30px] border border-[color:var(--line)] bg-[rgba(255,252,247,0.75)] p-5 shadow-[0_20px_45px_rgba(41,32,24,0.09)] backdrop-blur-sm">
-        <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-[color:var(--muted-foreground)]">
-            Recording Panel
-          </p>
-          <h1 className="mt-2 text-3xl leading-none">Workflow Buddy</h1>
-          <p className="mt-3 max-w-[16rem] text-sm leading-relaxed text-[color:var(--muted-foreground)]">
-            Keep this panel open while you work in the page. Capture the workflow, then polish each step into a model-ready brief.
-          </p>
-        </div>
-        <Badge variant={currentWorkflow?.status === "recording" ? "accent" : "subtle"}>
-          {currentWorkflow ? currentWorkflow.status : "idle"}
-        </Badge>
-      </div>
-
-      <div className="mt-4 space-y-4">
-        <Card>
+      <div className="space-y-4">
+        <Card
+          className={cn(
+            "transition-all duration-300",
+            isRecording && "recording-pulse border-[rgba(218,108,67,0.45)] bg-[rgba(255,248,240,0.92)]"
+          )}
+        >
           <CardHeader>
-            <CardTitle>Session</CardTitle>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted-foreground)]">
+                  Session
+                </p>
+                <CardTitle className="mt-2">Workflow Buddy</CardTitle>
+              </div>
+              <Badge variant={isRecording ? "accent" : currentWorkflow ? "default" : "subtle"}>
+                {sessionViewState}
+              </Badge>
+            </div>
             <CardDescription>
-              Create a workflow, then start recording clicks and input from the current tab without closing this panel.
+              Create a workflow, keep this panel open while you work in the page, then export only after the capture is complete.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {sessionError ? (
+              <div className="rounded-[20px] border border-[rgba(167,54,31,0.22)] bg-[rgba(218,108,67,0.12)] px-4 py-3 text-sm leading-relaxed text-[color:var(--ink-soft)]">
+                {sessionError}
+              </div>
+            ) : null}
             <Input
               placeholder="Name your workflow"
               value={workflowName}
               onChange={(event) => setWorkflowName(event.target.value)}
+              disabled={sessionViewState !== "idle"}
             />
-            <div className="grid grid-cols-2 gap-3">
+            {sessionViewState === "idle" ? (
               <Button variant="outline" onClick={handleCreateWorkflow}>
                 <PencilLine className="size-4" />
                 Create
               </Button>
-              <Button variant="secondary" onClick={handleStartRecording} disabled={!currentWorkflow}>
-                <Radio className="size-4" />
-                Start
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Button variant="outline" onClick={handleStopRecording} disabled={!currentWorkflow}>
+            ) : null}
+            {sessionViewState === "draft" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Button variant="secondary" onClick={() => void handleStartRecording()}>
+                  <StopCircle className="size-4" />
+                  Start
+                </Button>
+                <Button variant="outline" onClick={handleDiscardWorkflow}>
+                  <Trash2 className="size-4" />
+                  Discard
+                </Button>
+              </div>
+            ) : null}
+            {sessionViewState === "recording" ? (
+              <Button variant="secondary" onClick={handleStopRecording}>
+                <StopCircle className="size-4" />
                 Stop
               </Button>
-              <Button onClick={handleExport} disabled={!currentWorkflow || currentWorkflow.steps.length === 0}>
-                <Download className="size-4" />
-                Export
-              </Button>
-            </div>
+            ) : null}
+            {sessionViewState === "completed-empty" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Button variant="secondary" onClick={() => void handleStartRecording()}>
+                  <StopCircle className="size-4" />
+                  Resume
+                </Button>
+                <Button variant="outline" onClick={handleDiscardWorkflow}>
+                  <Trash2 className="size-4" />
+                  Discard
+                </Button>
+              </div>
+            ) : null}
+            {sessionViewState === "completed-ready" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Button onClick={handleExport}>
+                  <Download className="size-4" />
+                  Export
+                </Button>
+                <Button variant="outline" onClick={handleDiscardWorkflow}>
+                  <Trash2 className="size-4" />
+                  New
+                </Button>
+              </div>
+            ) : null}
             {currentWorkflow ? (
               <div className="rounded-[24px] border border-[color:var(--line)] bg-[color:var(--background)] p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-foreground)]">
@@ -285,7 +420,7 @@ export function App() {
                 ))
               ) : (
                 <div className="rounded-[24px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.32)] p-6 text-sm leading-relaxed text-[color:var(--muted-foreground)]">
-                  No steps yet. Start recording, keep this panel open, and interact with the recorded tab to capture each action.
+                  No steps yet. Record interactions in the active tab and the capture log will appear here automatically.
                 </div>
               )}
             </div>
