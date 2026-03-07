@@ -11,6 +11,11 @@ import {
   updateStep
 } from "./storage.js";
 import { exportWorkflowToMarkdown } from "./exportMarkdown.js";
+import {
+  getRecordingSessionSnapshot,
+  sendRecordingSessionEvent,
+  syncRecordingSessionActor
+} from "./recordingSessionMachine.js";
 
 async function configureSidePanelBehavior(): Promise<void> {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -85,6 +90,29 @@ async function exportWorkflow(workflowId: string): Promise<void> {
   }
 }
 
+function canStartRecording(): boolean {
+  const snapshot = getRecordingSessionSnapshot();
+  return (
+    snapshot.matches("draft") ||
+    snapshot.matches("completedEmpty") ||
+    snapshot.matches("completedReady")
+  );
+}
+
+function canStopRecording(): boolean {
+  return getRecordingSessionSnapshot().matches("recording");
+}
+
+function canExportWorkflow(): boolean {
+  return getRecordingSessionSnapshot().matches("completedReady");
+}
+
+async function readAndSyncStorageState() {
+  const state = await getState();
+  syncRecordingSessionActor(state);
+  return state;
+}
+
 void configureSidePanelBehavior();
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -101,6 +129,7 @@ chrome.runtime.onMessage.addListener((
   sendResponse: (response?: unknown) => void
 ) => {
   void (async () => {
+    const storageState = await readAndSyncStorageState();
     const parsed = extensionMessageSchema.safeParse(message);
     if (!parsed.success) {
       sendResponse({ error: "Invalid message payload" });
@@ -111,24 +140,37 @@ chrome.runtime.onMessage.addListener((
 
     switch (safeMessage.type) {
       case "GET_STATE": {
-        sendResponse(await getState());
+        sendResponse(storageState);
         return;
       }
       case "CREATE_WORKFLOW": {
-        sendResponse(await createWorkflow(safeMessage.name));
+        const workflow = await createWorkflow(safeMessage.name);
+        sendRecordingSessionEvent({ type: "CREATE_WORKFLOW", workflowId: workflow.id });
+        sendResponse(workflow);
         return;
       }
       case "CLEAR_CURRENT_WORKFLOW": {
-        sendResponse(await clearCurrentWorkflow());
+        const nextState = await clearCurrentWorkflow();
+        syncRecordingSessionActor(nextState);
+        sendResponse(nextState);
         return;
       }
       case "DELETE_WORKFLOW": {
-        sendResponse(await deleteWorkflow(safeMessage.workflowId));
+        const nextState = await deleteWorkflow(safeMessage.workflowId);
+        syncRecordingSessionActor(nextState);
+        sendResponse(nextState);
         return;
       }
       case "START_RECORDING": {
+        if (!canStartRecording()) {
+          sendResponse({ ok: false, error: "Recording can only start from a draft or completed workflow." });
+          return;
+        }
+
+        sendRecordingSessionEvent({ type: "START_REQUEST" });
         const readiness = await ensureContentScriptReady(safeMessage.tabId);
         if (!readiness.ok) {
+          sendRecordingSessionEvent({ type: "START_FAILURE", error: readiness.error });
           sendResponse(readiness);
           return;
         }
@@ -136,22 +178,56 @@ chrome.runtime.onMessage.addListener((
         const workflow = await startRecording(safeMessage.workflowId, safeMessage.tabId);
         if (workflow) {
           await sendMessageToTab(safeMessage.tabId, { type: "ENABLE_CAPTURE", workflowId: workflow.id });
+          sendRecordingSessionEvent({
+            type: "START_SUCCESS",
+            workflowId: workflow.id,
+            tabId: safeMessage.tabId,
+            stepCount: workflow.steps.length
+          });
           sendResponse({ ok: true, workflow });
           return;
         }
+        sendRecordingSessionEvent({ type: "START_FAILURE", error: "Workflow not found." });
         sendResponse({ ok: false, error: "Workflow not found." });
         return;
       }
       case "STOP_RECORDING": {
+        if (!canStopRecording()) {
+          sendResponse({ ok: false, error: "No recording session is active." });
+          return;
+        }
+
+        sendRecordingSessionEvent({ type: "STOP_REQUEST" });
         const workflow = await stopRecording(safeMessage.workflowId);
         if (workflow?.tabId !== undefined) {
           await sendMessageToTab(workflow.tabId, { type: "DISABLE_CAPTURE" });
+        }
+        if (workflow) {
+          sendRecordingSessionEvent({ type: "STOP_SUCCESS", stepCount: workflow.steps.length });
+        } else {
+          sendRecordingSessionEvent({ type: "STOP_FAILURE", error: "Workflow not found." });
         }
         sendResponse(workflow);
         return;
       }
       case "STEP_CAPTURED": {
-        sendResponse(await appendStep(safeMessage.workflowId, safeMessage.step));
+        const sessionSnapshot = getRecordingSessionSnapshot();
+        if (
+          !sessionSnapshot.matches("recording") ||
+          sessionSnapshot.context.workflowId !== safeMessage.workflowId
+        ) {
+          sendResponse(null);
+          return;
+        }
+
+        const step = await appendStep(safeMessage.workflowId, safeMessage.step);
+        if (step) {
+          sendRecordingSessionEvent({ type: "STEP_CAPTURED", workflowId: safeMessage.workflowId });
+        } else {
+          const nextState = await getState();
+          syncRecordingSessionActor(nextState);
+        }
+        sendResponse(step);
         return;
       }
       case "UPDATE_STEP": {
@@ -163,11 +239,23 @@ chrome.runtime.onMessage.addListener((
         return;
       }
       case "EXPORT_WORKFLOW": {
+        if (!canExportWorkflow()) {
+          sendResponse({ ok: false, error: "Only a completed workflow with recorded steps can be exported." });
+          return;
+        }
+
+        sendRecordingSessionEvent({ type: "EXPORT_REQUEST" });
         try {
           await exportWorkflow(safeMessage.workflowId);
-          await clearCurrentWorkflow();
+          const nextState = await clearCurrentWorkflow();
+          syncRecordingSessionActor(nextState);
+          sendRecordingSessionEvent({ type: "EXPORT_SUCCESS" });
           sendResponse({ ok: true });
         } catch (error) {
+          sendRecordingSessionEvent({
+            type: "EXPORT_FAILURE",
+            error: error instanceof Error ? error.message : "Export failed."
+          });
           sendResponse({
             ok: false,
             error: error instanceof Error ? error.message : "Export failed."

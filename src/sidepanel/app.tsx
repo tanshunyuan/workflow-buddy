@@ -1,17 +1,15 @@
-import { useEffect, useState, startTransition } from "react";
+import { useEffect, useId, useState, startTransition, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { createId } from "@/shared/ids";
 import { extensionMessageSchema, type ExtensionMessage } from "@/shared/messages";
 import { rootStorageSchema, storedScreenshotSchema, workflowSchema } from "@/shared/schemas";
 import { nowIso } from "@/shared/time";
-import type { RootStorage, StoredScreenshot, Workflow } from "@/shared/types";
-import { Download, FileImage, PencilLine, SquareMousePointer, StopCircle, Trash2 } from "lucide-react";
+import type { RootStorage, StoredScreenshot, Workflow, WorkflowStep } from "@/shared/types";
 
 type SessionViewState =
   | "idle"
@@ -64,6 +62,129 @@ async function fileToStoredScreenshot(file: File): Promise<StoredScreenshot> {
   });
 }
 
+function formatActionLabel(action: WorkflowStep["action"]): string {
+  return action === "click" ? "Click" : "Type";
+}
+
+function formatSessionLabel(viewState: SessionViewState): string {
+  switch (viewState) {
+    case "draft":
+      return "Draft";
+    case "recording":
+      return "Recording";
+    case "completed-empty":
+    case "completed-ready":
+      return "Completed";
+    default:
+      return "Idle";
+  }
+}
+
+function getSessionBadgeVariant(viewState: SessionViewState): "default" | "accent" | "completed" | "subtle" {
+  switch (viewState) {
+    case "draft":
+      return "default";
+    case "recording":
+      return "accent";
+    case "completed-empty":
+    case "completed-ready":
+      return "completed";
+    default:
+      return "subtle";
+  }
+}
+
+function formatClock(timestamp: string, withSeconds = false): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {})
+  });
+}
+
+function getPageHost(pageUrl: string): string {
+  try {
+    return new URL(pageUrl).host;
+  } catch {
+    return pageUrl;
+  }
+}
+
+function getStepHeading(step: WorkflowStep): string {
+  const description = step.description.trim();
+  if (description) return description;
+  return step.action === "click" ? "Clicked an element" : "Typed into a field";
+}
+
+function NoticeCard({
+  tone,
+  title,
+  children
+}: {
+  tone: "warning" | "error";
+  title: string;
+  children: ReactNode;
+}) {
+  const isWarning = tone === "warning";
+
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-[14px] border px-4 py-3",
+        isWarning
+          ? "border-[color:var(--warning-border)] bg-[color:var(--warning-bg)]"
+          : "border-[color:var(--error-border)] bg-[color:var(--error-bg)]"
+      )}
+    >
+      <div
+        className={cn(
+          "[font-family:var(--font-mono)] pt-px text-[12px] font-semibold",
+          isWarning ? "text-[color:var(--warning)]" : "text-[color:var(--error)]"
+        )}
+      >
+        {isWarning ? "△" : "✕"}
+      </div>
+      <div className="min-w-0">
+        <p
+          className={cn(
+            "[font-family:var(--font-mono)] mb-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
+            isWarning ? "text-[color:var(--warning)]" : "text-[color:var(--error)]"
+          )}
+        >
+          {title}
+        </p>
+        <p className="[font-family:var(--font-serif)] text-[13px] leading-[1.5] text-[color:var(--foreground)]">
+          {children}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function FieldLabel({
+  children,
+  optional
+}: {
+  children: ReactNode;
+  optional?: boolean;
+}) {
+  return (
+    <label className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-foreground)]">
+      {children}
+      {optional ? (
+        <span className="ml-2 [font-family:var(--font-serif)] text-[11px] font-normal normal-case tracking-normal text-[rgba(119,106,93,0.6)] italic">
+          optional
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
 export function App() {
   const [storageState, setStorageState] = useState<RootStorage>(createEmptyState);
   const [workflowName, setWorkflowName] = useState("");
@@ -72,14 +193,19 @@ export function App() {
   const [failureNotes, setFailureNotes] = useState("");
   const [pendingScreenshot, setPendingScreenshot] = useState<StoredScreenshot | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const screenshotInputId = useId();
 
   const currentWorkflow = storageState.currentWorkflowId
     ? storageState.workflowsById[storageState.currentWorkflowId]
     : undefined;
   const selectedStep = currentWorkflow?.steps.find((step) => step.id === selectedStepId);
+  const selectedScreenshot = selectedStep?.screenshotId
+    ? storageState.screenshotsById[selectedStep.screenshotId]
+    : null;
   const sessionViewState = getSessionViewState(currentWorkflow);
   const isRecording = sessionViewState === "recording";
-  const isCompleted = sessionViewState === "completed-empty" || sessionViewState === "completed-ready";
+  const missingDescriptionCount =
+    currentWorkflow?.steps.filter((step) => step.description.trim().length === 0).length ?? 0;
 
   async function refreshState() {
     const response = await sendMessage({ type: "GET_STATE" });
@@ -126,6 +252,12 @@ export function App() {
     setFailureNotes(selectedStep?.failureNotes ?? "");
     setPendingScreenshot(null);
   }, [selectedStepId, selectedStep?.description, selectedStep?.failureNotes]);
+
+  function resetSelectedStepDraft() {
+    setDescription(selectedStep?.description ?? "");
+    setFailureNotes(selectedStep?.failureNotes ?? "");
+    setPendingScreenshot(null);
+  }
 
   function getStartErrorMessage(response: unknown): string | null {
     if (
@@ -275,152 +407,197 @@ export function App() {
   }
 
   return (
-    <div className="grain min-h-screen p-4 text-[color:var(--foreground)]">
-      <div className="space-y-4">
-        <Card
-          className={cn(
-            "transition-all duration-300",
-            isRecording && "recording-pulse border-[rgba(218,108,67,0.45)] bg-[rgba(255,248,240,0.92)]"
-          )}
-        >
-          <CardHeader>
+    <div className="grain min-h-screen bg-transparent px-4 py-5 text-[color:var(--foreground)]">
+      <div className="mx-auto flex w-full max-w-[620px] flex-col gap-4">
+        <Card>
+          <CardHeader className="gap-2">
+            <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted-foreground)]">
+              Extension · Side Panel
+            </p>
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--muted-foreground)]">
-                  Session
-                </p>
-                <CardTitle className="mt-2">Workflow Buddy</CardTitle>
+              <div className="space-y-1">
+                <CardTitle className="text-[18px]">Workflow Buddy</CardTitle>
+                <CardDescription>
+                  Keep this panel open while you record. Capture stays narrow, readable, and ready for export.
+                </CardDescription>
               </div>
-              <Badge variant={isRecording ? "accent" : currentWorkflow ? "default" : "subtle"}>
-                {sessionViewState}
+              <Badge variant={getSessionBadgeVariant(sessionViewState)}>
+                {isRecording ? <span className="mr-0.5 inline-block size-[5px] rounded-full bg-current opacity-90" /> : null}
+                {formatSessionLabel(sessionViewState)}
               </Badge>
             </div>
-            <CardDescription>
-              Create a workflow, keep this panel open while you work in the page, then export only after the capture is complete.
-            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {sessionError ? (
-              <div className="rounded-[20px] border border-[rgba(167,54,31,0.22)] bg-[rgba(218,108,67,0.12)] px-4 py-3 text-sm leading-relaxed text-[color:var(--ink-soft)]">
-                {sessionError}
-              </div>
-            ) : null}
-            <Input
-              placeholder="Name your workflow"
-              value={workflowName}
-              onChange={(event) => setWorkflowName(event.target.value)}
-              disabled={sessionViewState !== "idle"}
-            />
-            {sessionViewState === "idle" ? (
-              <Button variant="outline" onClick={handleCreateWorkflow}>
-                <PencilLine className="size-4" />
-                Create
-              </Button>
-            ) : null}
-            {sessionViewState === "draft" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Button variant="secondary" onClick={() => void handleStartRecording()}>
-                  <StopCircle className="size-4" />
-                  Start
-                </Button>
-                <Button variant="outline" onClick={handleDiscardWorkflow}>
-                  <Trash2 className="size-4" />
-                  Discard
-                </Button>
-              </div>
-            ) : null}
-            {sessionViewState === "recording" ? (
-              <Button variant="secondary" onClick={handleStopRecording}>
-                <StopCircle className="size-4" />
-                Stop
-              </Button>
-            ) : null}
-            {sessionViewState === "completed-empty" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Button variant="secondary" onClick={() => void handleStartRecording()}>
-                  <StopCircle className="size-4" />
-                  Resume
-                </Button>
-                <Button variant="outline" onClick={handleDiscardWorkflow}>
-                  <Trash2 className="size-4" />
-                  Discard
-                </Button>
-              </div>
-            ) : null}
-            {sessionViewState === "completed-ready" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Button onClick={handleExport}>
-                  <Download className="size-4" />
-                  Export
-                </Button>
-                <Button variant="outline" onClick={handleDiscardWorkflow}>
-                  <Trash2 className="size-4" />
-                  New
-                </Button>
-              </div>
-            ) : null}
+          <CardContent className="space-y-4">
             {currentWorkflow ? (
-              <div className="rounded-[24px] border border-[color:var(--line)] bg-[color:var(--background)] p-4">
-                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted-foreground)]">
-                  Active Workflow
+              <div
+                className={cn(
+                  "relative overflow-hidden rounded-[16px] border bg-[color:var(--panel-strong)] p-4 before:pointer-events-none before:absolute before:inset-0 before:rounded-[16px] before:bg-[linear-gradient(135deg,rgba(218,108,67,0.08)_0%,transparent_60%)]",
+                  isRecording ? "recording-pulse border-[color:var(--accent-border)]" : "border-[color:var(--line)]"
+                )}
+              >
+                <div className="relative z-10 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-foreground)]">
+                      Active Session
+                    </p>
+                    <p className="mt-2 text-[16px] font-semibold leading-[1.4] text-[color:var(--foreground)]">
+                      {currentWorkflow.name}
+                    </p>
+                    <p className="[font-family:var(--font-mono)] mt-1 text-[11px] leading-[1.4] text-[color:var(--muted-foreground)]">
+                      Started {formatClock(currentWorkflow.createdAt)} · {currentWorkflow.steps.length} step
+                      {currentWorkflow.steps.length === 1 ? "" : "s"} captured
+                    </p>
+                  </div>
+                  <Badge variant={getSessionBadgeVariant(sessionViewState)}>
+                    {isRecording ? <span className="mr-0.5 inline-block size-[5px] rounded-full bg-current opacity-90" /> : null}
+                    {formatSessionLabel(sessionViewState)}
+                  </Badge>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-[16px] border border-dashed border-[rgba(62,46,31,0.18)] px-5 py-7 text-center">
+                <p className="text-[15px] font-medium italic text-[color:var(--muted-foreground)]">
+                  No active workflow yet
                 </p>
-                <p className="mt-2 text-lg">{currentWorkflow.name}</p>
-                <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
-                  {currentWorkflow.steps.length} recorded step{currentWorkflow.steps.length === 1 ? "" : "s"}
+                <p className="[font-family:var(--font-mono)] mt-2 text-[10px] uppercase tracking-[0.14em] text-[rgba(119,106,93,0.55)]">
+                  Name a workflow to begin recording in this tab
                 </p>
+              </div>
+            )}
+
+            {sessionError ? (
+              <NoticeCard tone="error" title="Session Issue">
+                {sessionError}
+              </NoticeCard>
+            ) : null}
+
+            {!sessionError && currentWorkflow && currentWorkflow.steps.length > 0 && missingDescriptionCount > 0 ? (
+              <NoticeCard tone="warning" title="Missing Descriptions">
+                {missingDescriptionCount} step{missingDescriptionCount === 1 ? "" : "s"} still need narrative context before export.
+              </NoticeCard>
+            ) : null}
+
+            {sessionViewState === "idle" ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <FieldLabel>Workflow Name</FieldLabel>
+                  <Input
+                    placeholder="Login and submit support ticket"
+                    value={workflowName}
+                    onChange={(event) => setWorkflowName(event.target.value)}
+                  />
+                </div>
+                <Button className="w-full" onClick={handleCreateWorkflow}>
+                  Create Workflow
+                </Button>
+              </div>
+            ) : null}
+
+            {sessionViewState === "draft" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => void handleStartRecording()}>Start Recording</Button>
+                <Button variant="ghost" onClick={handleDiscardWorkflow}>
+                  Discard
+                </Button>
+              </div>
+            ) : null}
+
+            {sessionViewState === "recording" ? (
+              <Button className="w-full" variant="stop" onClick={handleStopRecording}>
+                Stop Recording
+              </Button>
+            ) : null}
+
+            {sessionViewState === "completed-empty" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => void handleStartRecording()}>Resume Recording</Button>
+                <Button variant="ghost" onClick={handleDiscardWorkflow}>
+                  Discard
+                </Button>
+              </div>
+            ) : null}
+
+            {sessionViewState === "completed-ready" ? (
+              <div className="space-y-2">
+                <Button className="w-full" variant="outline" onClick={handleExport}>
+                  Export as Markdown
+                </Button>
+                <Button className="w-full" variant="ghost" onClick={handleDiscardWorkflow}>
+                  New Workflow
+                </Button>
               </div>
             ) : null}
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Captured Steps</CardTitle>
+          <CardHeader className="gap-2">
+            <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted-foreground)]">
+              Capture Log
+            </p>
+            <CardTitle className="text-[18px]">Captured Steps</CardTitle>
             <CardDescription>
-              The raw interaction log. Pick a step to add meaning, failure notes, and screenshots.
+              Each row is a recorded interaction. Select one to add explanation, failure notes, and a screenshot.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="max-h-[36vh] space-y-3 overflow-y-auto pr-1">
+          <CardContent className="py-4">
+            <div className="max-h-[34vh] space-y-1.5 overflow-y-auto">
               {currentWorkflow?.steps.length ? (
                 currentWorkflow.steps.map((step) => (
                   <button
                     key={step.id}
                     type="button"
                     onClick={() => setSelectedStepId(step.id)}
-                    className={[
-                      "w-full rounded-[24px] border p-4 text-left transition-all",
-                      selectedStepId === step.id
-                        ? "border-[color:var(--accent)] bg-[rgba(218,108,67,0.12)] shadow-[0_12px_24px_rgba(218,108,67,0.12)]"
-                        : "border-[color:var(--line)] bg-[color:var(--background)] hover:border-[rgba(61,43,31,0.25)]"
-                    ].join(" ")}
+                    className={cn(
+                      "w-full rounded-[12px] border border-transparent bg-transparent px-[14px] py-3 text-left transition-colors hover:border-[color:var(--line)] hover:bg-[rgba(239,228,213,0.5)]",
+                      selectedStepId === step.id &&
+                        "border-[color:var(--accent-border)] bg-[color:var(--accent-muted)]"
+                    )}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={step.action === "click" ? "default" : "accent"}>{step.action}</Badge>
-                        <span className="font-mono text-xs text-[color:var(--muted-foreground)]">
-                          Step {step.index}
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="[font-family:var(--font-mono)] min-w-[20px] text-[10px] font-semibold tracking-[0.08em] text-[color:var(--muted-foreground)]">
+                        {String(step.index).padStart(2, "0")}
+                      </span>
+                      <span
+                        className={cn(
+                          "[font-family:var(--font-mono)] inline-flex items-center rounded-[4px] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.14em]",
+                          step.action === "click"
+                            ? "bg-[rgba(62,46,31,0.08)] text-[color:var(--ink-soft)]"
+                            : "bg-[color:var(--typed-value-bg)] text-[color:var(--typed-value-fg)]"
+                        )}
+                      >
+                        {formatActionLabel(step.action)}
+                      </span>
+                      <span className="[font-family:var(--font-mono)] ml-auto text-[10px] text-[color:var(--muted-foreground)]">
+                        {formatClock(step.timestamp, true)}
+                      </span>
+                    </div>
+
+                    <p className="pl-7 text-[13px] leading-[1.5] text-[color:var(--foreground)]">
+                      {getStepHeading(step)}
+                    </p>
+
+                    {step.typedValue ? (
+                      <div className="pl-7 pt-1">
+                        <span className="[font-family:var(--font-mono)] inline-block rounded-[4px] bg-[color:var(--typed-value-bg)] px-[6px] py-[2px] text-[11px] text-[color:var(--typed-value-fg)]">
+                          {step.typedValue}
                         </span>
                       </div>
-                      {step.screenshotId ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-[color:var(--muted-foreground)]">
-                          <FileImage className="size-3.5" />
-                          image
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-[color:var(--foreground)]">
-                      {step.description || "No description yet. This step still needs narrative context."}
-                    </p>
-                    <p className="mt-3 inline-flex items-center gap-2 text-xs text-[color:var(--muted-foreground)]">
-                      <SquareMousePointer className="size-3.5" />
-                      {new URL(step.pageUrl).hostname}
+                    ) : null}
+
+                    <p className="[font-family:var(--font-mono)] mt-[3px] truncate pl-7 text-[10px] text-[color:var(--muted-foreground)]">
+                      {getPageHost(step.pageUrl)}
                     </p>
                   </button>
                 ))
               ) : (
-                <div className="rounded-[24px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.32)] p-6 text-sm leading-relaxed text-[color:var(--muted-foreground)]">
-                  No steps yet. Record interactions in the active tab and the capture log will appear here automatically.
+                <div className="rounded-[16px] border border-dashed border-[rgba(62,46,31,0.18)] px-5 py-8 text-center">
+                  <p className="text-[15px] font-medium italic text-[color:var(--muted-foreground)]">
+                    No steps recorded yet
+                  </p>
+                  <p className="[font-family:var(--font-mono)] mt-2 text-[10px] uppercase tracking-[0.14em] text-[rgba(119,106,93,0.55)]">
+                    Start recording to capture clicks and typed values
+                  </p>
                 </div>
               )}
             </div>
@@ -428,57 +605,58 @@ export function App() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Step Editor</CardTitle>
+          <CardHeader className="gap-2">
+            <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted-foreground)]">
+              Step Editor
+            </p>
+            <CardTitle className="text-[18px]">
+              {selectedStep ? getStepHeading(selectedStep) : "No step selected"}
+            </CardTitle>
             <CardDescription>
-              Turn the raw event into a reusable instruction for the downstream model.
+              Turn the raw event into an instruction another model can use reliably.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-[18px]">
             {selectedStep ? (
               <>
-                <div className="rounded-[24px] border border-[color:var(--line)] bg-[color:var(--background)] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <Badge variant="subtle">Step {selectedStep.index}</Badge>
-                    <span className="font-mono text-xs text-[color:var(--muted-foreground)]">
-                      {selectedStep.action}
-                    </span>
-                  </div>
-                  <Separator className="my-3" />
-                  <p className="line-clamp-4 text-xs leading-relaxed text-[color:var(--muted-foreground)]">
-                    {selectedStep.elementHtml}
+                <div className="space-y-1">
+                  <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--muted-foreground)]">
+                    Step {String(selectedStep.index).padStart(2, "0")} · {formatActionLabel(selectedStep.action)}
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--muted-foreground)]">
-                    Description
-                  </label>
+                <div className="space-y-1.5">
+                  <FieldLabel>Description</FieldLabel>
                   <Textarea
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
-                    placeholder="Describe what this step does in plain language."
+                    placeholder="Describe what this step does and why it matters."
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--muted-foreground)]">
-                    Failure Notes
-                  </label>
+                <div className="space-y-1.5">
+                  <FieldLabel>Element HTML</FieldLabel>
+                  <pre className="[font-family:var(--font-mono)] overflow-x-auto whitespace-pre rounded-[12px] border border-[color:var(--line)] bg-[color:var(--background)] px-[14px] py-3 text-[11px] leading-[1.5] text-[color:var(--muted-foreground)]">
+                    {selectedStep.elementHtml}
+                  </pre>
+                </div>
+
+                <div className="space-y-1.5">
+                  <FieldLabel optional>Failure Notes</FieldLabel>
                   <Textarea
                     value={failureNotes}
                     onChange={(event) => setFailureNotes(event.target.value)}
-                    placeholder="Optional: explain what to do if this interaction fails."
+                    placeholder="Describe what might go wrong and how to recover."
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--muted-foreground)]">
-                    Screenshot
-                  </label>
-                  <Input
+                <div className="space-y-1.5">
+                  <FieldLabel optional>Screenshot</FieldLabel>
+                  <input
+                    id={screenshotInputId}
                     type="file"
                     accept="image/*"
+                    className="sr-only"
                     onChange={async (event) => {
                       const file = event.target.files?.[0];
                       if (!file) {
@@ -489,20 +667,43 @@ export function App() {
                       setPendingScreenshot(await fileToStoredScreenshot(file));
                     }}
                   />
+                  <label
+                    htmlFor={screenshotInputId}
+                    className="block cursor-pointer rounded-[14px] border-[1.5px] border-dashed border-[rgba(62,46,31,0.2)] px-5 py-5 text-center transition-colors hover:border-[rgba(218,108,67,0.3)] hover:bg-[rgba(218,108,67,0.03)]"
+                  >
+                    <p className="text-[13px] italic text-[color:var(--muted-foreground)]">
+                      Drop a screenshot here, or click to attach
+                    </p>
+                    <p className="[font-family:var(--font-mono)] mt-1 text-[10px] tracking-[0.1em] text-[rgba(119,106,93,0.55)]">
+                      PNG · JPG · WEBP
+                    </p>
+                  </label>
                   {pendingScreenshot ? (
-                    <p className="text-xs text-[color:var(--muted-foreground)]">
-                      Pending attachment: {pendingScreenshot.name}
+                    <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
+                      Pending attachment · {pendingScreenshot.name}
+                    </p>
+                  ) : selectedScreenshot ? (
+                    <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
+                      Attached · {selectedScreenshot.name}
                     </p>
                   ) : null}
                 </div>
 
-                <Button className="w-full" onClick={handleSaveStep}>
-                  Save Step
-                </Button>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button variant="ghost" onClick={resetSelectedStepDraft}>
+                    Discard
+                  </Button>
+                  <Button onClick={handleSaveStep}>Save Step</Button>
+                </div>
               </>
             ) : (
-              <div className="rounded-[24px] border border-dashed border-[color:var(--line)] bg-[rgba(255,255,255,0.32)] p-6 text-sm leading-relaxed text-[color:var(--muted-foreground)]">
-                Select a recorded step to add a description, screenshot, and failure notes.
+              <div className="rounded-[16px] border border-dashed border-[rgba(62,46,31,0.18)] px-5 py-8 text-center">
+                <p className="text-[15px] font-medium italic text-[color:var(--muted-foreground)]">
+                  Select a recorded step to begin editing
+                </p>
+                <p className="[font-family:var(--font-mono)] mt-2 text-[10px] uppercase tracking-[0.14em] text-[rgba(119,106,93,0.55)]">
+                  Add descriptions, failure notes, and screenshots here
+                </p>
               </div>
             )}
           </CardContent>

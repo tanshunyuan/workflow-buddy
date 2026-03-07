@@ -20,11 +20,24 @@
   --line: rgba(62, 46, 31, 0.14);
   --accent: #da6c43;
   --accent-foreground: #fff7ef;
+  --accent-muted: rgba(218, 108, 67, 0.07);
+  --accent-border: rgba(218, 108, 67, 0.22);
   --ring: #c25b35;
+  --ring-shadow: rgba(194, 91, 53, 0.1);
   --ink-soft: #3d2b1f;
+  --warning: #b8833a;
+  --warning-bg: #fdf3e3;
+  --warning-border: rgba(184, 131, 58, 0.25);
+  --error: #9b3a3a;
+  --error-bg: #fdf0f0;
+  --error-border: rgba(155, 58, 58, 0.22);
+  --typed-value-bg: rgba(218, 108, 67, 0.07);
+  --typed-value-fg: #a84e2a;
 }
 
 @theme inline {
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--panel);
@@ -48,8 +61,8 @@ body,
 body {
   min-width: 320px;
   background:
-    radial-gradient(circle at top left, rgba(218, 108, 67, 0.22), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(93, 126, 112, 0.18), transparent 30%),
+    radial-gradient(ellipse 80% 60% at 15% 10%, rgba(218, 108, 67, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 80% at 85% 90%, rgba(100, 120, 80, 0.04) 0%, transparent 55%),
     linear-gradient(180deg, #fbf7f1 0%, #f2e9dc 100%);
   color: var(--foreground);
   font-family: var(--font-serif);
@@ -73,20 +86,16 @@ body {
 @keyframes recordingPulse {
   0%,
   100% {
-    box-shadow:
-      0 18px 40px rgba(33, 28, 24, 0.08),
-      0 0 0 0 rgba(218, 108, 67, 0.14);
-    border-color: rgba(218, 108, 67, 0.34);
+    box-shadow: 0 0 0 0 rgba(218, 108, 67, 0);
+    border-color: var(--accent-border);
   }
 
   50% {
-    box-shadow:
-      0 18px 40px rgba(33, 28, 24, 0.1),
-      0 0 0 14px rgba(218, 108, 67, 0);
-    border-color: rgba(218, 108, 67, 0.62);
+    box-shadow: 0 0 0 4px rgba(218, 108, 67, 0.12);
+    border-color: var(--accent-border);
   }
 }
 
 .recording-pulse {
-  animation: recordingPulse 1.8s ease-in-out infinite;
+  animation: recordingPulse 3s ease-in-out infinite;
 }
