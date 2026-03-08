@@ -7,6 +7,7 @@ import {
   attachScreenshot,
   clearCurrentWorkflow,
   createWorkflow,
+  detachScreenshot,
   deleteStep,
   deleteWorkflow,
   getState,
@@ -330,6 +331,10 @@ chrome.runtime.onMessage.addListener((
       }
       case "ATTACH_SCREENSHOT": {
         sendResponse(await attachScreenshot(safeMessage.workflowId, safeMessage.stepId, safeMessage.screenshot));
+        return;
+      }
+      case "DETACH_SCREENSHOT": {
+        sendResponse(await detachScreenshot(safeMessage.workflowId, safeMessage.stepId));
         return;
       }
       case "EXPORT_WORKFLOW": {

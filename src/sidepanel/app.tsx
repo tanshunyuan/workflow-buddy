@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useForm } from "react-hook-form";
-import { Camera, Trash2 } from "lucide-react";
+import { Camera, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -300,6 +300,8 @@ export function App() {
   const [isScreenshotExpanded, setIsScreenshotExpanded] = useState(false);
   const [isAttachingScreenshot, setIsAttachingScreenshot] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [previewScreenshot, setPreviewScreenshot] =
+    useState<StoredScreenshot | null>(null);
   const screenshotInputId = useId();
   const stepsBottomRef = useRef<HTMLDivElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -373,6 +375,14 @@ export function App() {
     setDescription(selectedStep?.description ?? "");
     setFailureNotes(selectedStep?.failureNotes ?? "");
   }, [selectedStepId, selectedStep?.description, selectedStep?.failureNotes]);
+
+  useEffect(() => {
+    if (!previewScreenshot) return;
+
+    if (!storageState.screenshotsById[previewScreenshot.id]) {
+      setPreviewScreenshot(null);
+    }
+  }, [previewScreenshot, storageState.screenshotsById]);
 
   useEffect(() => {
     setIsNotesExpanded(false);
@@ -478,6 +488,26 @@ export function App() {
 
   async function handleScreenshotFile(file: File) {
     await attachScreenshotToSelectedStep(await fileToStoredScreenshot(file));
+  }
+
+  async function handleDetachScreenshot(stepId: string) {
+    if (!currentWorkflow) return;
+
+    const step = currentWorkflow.steps.find((item) => item.id === stepId);
+    const screenshotId = step?.screenshotId;
+
+    setSessionError(null);
+    await sendMessage({
+      type: "DETACH_SCREENSHOT",
+      workflowId: currentWorkflow.id,
+      stepId,
+    });
+
+    if (previewScreenshot && screenshotId === previewScreenshot.id) {
+      setPreviewScreenshot(null);
+    }
+
+    await refreshState();
   }
 
   function getStartErrorMessage(response: unknown): string | null {
@@ -706,6 +736,12 @@ export function App() {
     };
 
     const handleDocumentKeydown = (event: KeyboardEvent) => {
+      if (previewScreenshot && event.key === "Escape") {
+        event.preventDefault();
+        setPreviewScreenshot(null);
+        return;
+      }
+
       if (event.key === "Escape") {
         event.preventDefault();
         void saveAndCloseAnnotation();
@@ -730,6 +766,7 @@ export function App() {
     failureNotes,
     currentWorkflow,
     selectedStep,
+    previewScreenshot,
   ]);
 
   return (
@@ -1126,24 +1163,43 @@ export function App() {
                                   </div>
 
                                   {stepScreenshot ? (
-                                    <div className="rounded-[10px] border border-[color:var(--line)] bg-[color:var(--background)] p-3">
-                                      <div className="flex items-center gap-3">
-                                        <div className="h-[32px] w-[44px] overflow-hidden rounded-[6px] border border-[color:var(--line)] bg-[color:var(--panel-strong)]">
+                                    <div className="relative rounded-[10px] border border-[color:var(--line)] bg-[color:var(--background)] p-3">
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setPreviewScreenshot(stepScreenshot);
+                                        }}
+                                        className="group flex w-full items-center gap-3 rounded-[8px] text-left transition-colors hover:bg-[rgba(62,46,31,0.04)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(218,108,67,0.12)]"
+                                        aria-label={`Expand screenshot ${stepScreenshot.name}`}
+                                      >
+                                        <div className="h-[56px] w-[74px] shrink-0 overflow-hidden rounded-[8px] border border-[color:var(--line)] bg-[color:var(--panel-strong)]">
                                           <img
                                             src={stepScreenshot.dataUrl}
                                             alt={stepScreenshot.name}
-                                            className="h-full w-full object-cover"
+                                            className="h-full w-full object-cover transition-transform duration-150 group-hover:scale-[1.02]"
                                           />
                                         </div>
-                                        <div className="min-w-0 flex-1">
+                                        <div className="min-w-0 flex-1 pr-8">
                                           <p className="[font-family:var(--font-mono)] truncate text-[10px] text-[color:var(--foreground)]">
                                             {stepScreenshot.name}
                                           </p>
                                           <p className="[font-family:var(--font-mono)] mt-1 text-[9px] uppercase tracking-[0.1em] text-[color:var(--muted-foreground)]">
-                                            Attached
+                                            Attached · click to enlarge
                                           </p>
                                         </div>
-                                      </div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void handleDetachScreenshot(step.id);
+                                        }}
+                                        className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-full border border-[rgba(62,46,31,0.12)] bg-[rgba(255,252,247,0.92)] text-[color:var(--muted-foreground)] transition-colors hover:border-[color:var(--error-border)] hover:bg-[color:var(--error-bg)] hover:text-[color:var(--error)]"
+                                        aria-label={`Remove screenshot from step ${step.index}`}
+                                      >
+                                        <X className="size-3.5" />
+                                      </button>
                                     </div>
                                   ) : isAttachingScreenshot ? (
                                     <p className="[font-family:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
@@ -1181,6 +1237,44 @@ export function App() {
           </CardContent>
         </Card>
       </div>
+      {previewScreenshot ? (
+        <div
+          data-step-card="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(24,20,18,0.42)] p-4 backdrop-blur-[2px]"
+          onClick={() => setPreviewScreenshot(null)}
+        >
+          <div
+            className="relative w-full max-w-[560px] rounded-[22px] border border-[rgba(62,46,31,0.12)] bg-[color:var(--panel)] p-4 shadow-[0_18px_48px_rgba(23,19,17,0.24)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewScreenshot(null)}
+              className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full border border-[rgba(62,46,31,0.12)] bg-[rgba(255,252,247,0.92)] text-[color:var(--muted-foreground)] transition-colors hover:border-[color:var(--line)] hover:text-[color:var(--foreground)]"
+              aria-label="Close screenshot preview"
+            >
+              <X className="size-4" />
+            </button>
+            <div className="space-y-3 pr-10">
+              <div>
+                <p className="[font-family:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-foreground)]">
+                  Screenshot Preview
+                </p>
+                <p className="[font-family:var(--font-mono)] mt-1 truncate text-[10px] text-[color:var(--foreground)]">
+                  {previewScreenshot.name}
+                </p>
+              </div>
+              <div className="overflow-hidden rounded-[16px] border border-[color:var(--line)] bg-[color:var(--background)]">
+                <img
+                  src={previewScreenshot.dataUrl}
+                  alt={previewScreenshot.name}
+                  className="max-h-[70vh] w-full object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

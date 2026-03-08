@@ -232,3 +232,34 @@ export async function attachScreenshot(
   await saveState(state);
   return step;
 }
+
+export async function detachScreenshot(
+  workflowId: string,
+  stepId: string
+): Promise<WorkflowStep | null> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+  if (!workflow) return null;
+
+  const step = workflow.steps.find((item) => item.id === stepId);
+  if (!step) return null;
+
+  const screenshotId = step.screenshotId;
+  if (!screenshotId) {
+    return step;
+  }
+
+  delete step.screenshotId;
+
+  const isScreenshotStillReferenced = Object.values(state.workflowsById).some((item) =>
+    item.steps.some((workflowStep) => workflowStep.screenshotId === screenshotId)
+  );
+
+  if (!isScreenshotStillReferenced) {
+    delete state.screenshotsById[screenshotId];
+  }
+
+  workflow.updatedAt = nowIso();
+  await saveState(state);
+  return step;
+}
