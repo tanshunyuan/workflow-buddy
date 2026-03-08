@@ -4,21 +4,39 @@ import {
   useId,
   useRef,
   useState,
-  type ReactNode
+  type ReactNode,
 } from "react";
 import { useForm } from "react-hook-form";
 import { Camera, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { createId } from "@/shared/ids";
-import { extensionMessageSchema, type ExtensionMessage } from "@/shared/messages";
-import { rootStorageSchema, storedScreenshotSchema, workflowSchema } from "@/shared/schemas";
+import {
+  extensionMessageSchema,
+  type ExtensionMessage,
+} from "@/shared/messages";
+import {
+  rootStorageSchema,
+  storedScreenshotSchema,
+  workflowSchema,
+} from "@/shared/schemas";
 import { nowIso } from "@/shared/time";
-import type { RootStorage, StoredScreenshot, Workflow, WorkflowStep } from "@/shared/types";
+import type {
+  RootStorage,
+  StoredScreenshot,
+  Workflow,
+  WorkflowStep,
+} from "@/shared/types";
 import { useAutoScroll } from "./useAutoScroll";
 
 type SessionViewState =
@@ -32,7 +50,8 @@ function getSessionViewState(workflow: Workflow | undefined): SessionViewState {
   if (!workflow) return "idle";
   if (workflow.status === "draft") return "draft";
   if (workflow.status === "recording") return "recording";
-  if (workflow.status === "completed" && workflow.steps.length === 0) return "completed-empty";
+  if (workflow.status === "completed" && workflow.steps.length === 0)
+    return "completed-empty";
   return "completed-ready";
 }
 
@@ -41,7 +60,7 @@ function createEmptyState(): RootStorage {
     currentWorkflowId: null,
     workflowsById: {},
     screenshotsById: {},
-    activeRecordingTabId: null
+    activeRecordingTabId: null,
   });
 }
 
@@ -68,15 +87,17 @@ async function fileToStoredScreenshot(file: File): Promise<StoredScreenshot> {
     name: file.name,
     mimeType: file.type || "image/png",
     dataUrl,
-    createdAt: nowIso()
+    createdAt: nowIso(),
   });
 }
 
-function getImageFileFromClipboard(clipboardData: DataTransfer | null): File | null {
+function getImageFileFromClipboard(
+  clipboardData: DataTransfer | null,
+): File | null {
   if (!clipboardData) return null;
 
   const imageItem = Array.from(clipboardData.items).find((item) =>
-    item.type.startsWith("image/")
+    item.type.startsWith("image/"),
   );
 
   return imageItem?.getAsFile() ?? null;
@@ -97,6 +118,7 @@ function formatSessionLabel(viewState: SessionViewState): string {
     case "recording":
       return "Recording";
     case "completed-empty":
+      return "Paused";
     case "completed-ready":
       return "Completed";
     default:
@@ -104,7 +126,20 @@ function formatSessionLabel(viewState: SessionViewState): string {
   }
 }
 
-function getSessionBadgeVariant(viewState: SessionViewState): "default" | "accent" | "completed" | "subtle" {
+function getPanelBadgeLabel(viewState: SessionViewState): string | null {
+  switch (viewState) {
+    case "draft":
+      return "Draft";
+    case "recording":
+      return "Recording";
+    default:
+      return null;
+  }
+}
+
+function getSessionBadgeVariant(
+  viewState: SessionViewState,
+): "default" | "accent" | "completed" | "subtle" {
   switch (viewState) {
     case "draft":
       return "default";
@@ -127,7 +162,7 @@ function formatClock(timestamp: string, withSeconds = false): string {
   return date.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" } : {})
+    ...(withSeconds ? { second: "2-digit" } : {}),
   });
 }
 
@@ -147,7 +182,7 @@ function getStepHeading(step: WorkflowStep): string {
 function NoticeCard({
   tone,
   title,
-  children
+  children,
 }: {
   tone: "warning" | "error";
   title: string;
@@ -161,13 +196,15 @@ function NoticeCard({
         "flex items-start gap-3 rounded-[14px] border px-4 py-3",
         isWarning
           ? "border-[color:var(--warning-border)] bg-[color:var(--warning-bg)]"
-          : "border-[color:var(--error-border)] bg-[color:var(--error-bg)]"
+          : "border-[color:var(--error-border)] bg-[color:var(--error-bg)]",
       )}
     >
       <div
         className={cn(
           "[font-family:var(--font-mono)] pt-px text-[12px] font-semibold",
-          isWarning ? "text-[color:var(--warning)]" : "text-[color:var(--error)]"
+          isWarning
+            ? "text-[color:var(--warning)]"
+            : "text-[color:var(--error)]",
         )}
       >
         {isWarning ? "△" : "✕"}
@@ -176,7 +213,9 @@ function NoticeCard({
         <p
           className={cn(
             "[font-family:var(--font-mono)] mb-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-            isWarning ? "text-[color:var(--warning)]" : "text-[color:var(--error)]"
+            isWarning
+              ? "text-[color:var(--warning)]"
+              : "text-[color:var(--error)]",
           )}
         >
           {title}
@@ -191,7 +230,7 @@ function NoticeCard({
 
 function FieldLabel({
   children,
-  optional
+  optional,
 }: {
   children: ReactNode;
   optional?: boolean;
@@ -210,7 +249,7 @@ function FieldLabel({
 
 function ActionChip({
   action,
-  className
+  className,
 }: {
   action: WorkflowStep["action"];
   className?: string;
@@ -222,7 +261,7 @@ function ActionChip({
         action === "click"
           ? "bg-[rgba(62,46,31,0.08)] text-[color:var(--ink-soft)]"
           : "bg-[color:var(--typed-value-bg)] text-[color:var(--typed-value-fg)]",
-        className
+        className,
       )}
     >
       {formatActionChipLabel(action)}
@@ -232,7 +271,7 @@ function ActionChip({
 
 function AnnotationChip({
   label,
-  active
+  active,
 }: {
   label: ReactNode;
   active: boolean;
@@ -243,7 +282,7 @@ function AnnotationChip({
         "[font-family:var(--font-mono)] inline-flex items-center rounded-[4px] px-[6px] py-[2px] text-[9px] font-semibold uppercase tracking-[0.1em]",
         active
           ? "bg-[rgba(218,108,67,0.1)] text-[color:var(--typed-value-fg)]"
-          : "bg-[rgba(62,46,31,0.07)] text-[color:var(--muted-foreground)]"
+          : "bg-[rgba(62,46,31,0.07)] text-[color:var(--muted-foreground)]",
       )}
     >
       {label}
@@ -252,7 +291,8 @@ function AnnotationChip({
 }
 
 export function App() {
-  const [storageState, setStorageState] = useState<RootStorage>(createEmptyState);
+  const [storageState, setStorageState] =
+    useState<RootStorage>(createEmptyState);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [failureNotes, setFailureNotes] = useState("");
@@ -267,21 +307,26 @@ export function App() {
     register,
     handleSubmit,
     reset,
-    formState: { errors }
+    formState: { errors },
   } = useForm<{ workflowName: string }>({
     defaultValues: {
-      workflowName: ""
-    }
+      workflowName: "",
+    },
   });
 
   const currentWorkflow = storageState.currentWorkflowId
     ? storageState.workflowsById[storageState.currentWorkflowId]
     : undefined;
-  const selectedStep = currentWorkflow?.steps.find((step) => step.id === selectedStepId);
+  const selectedStep = currentWorkflow?.steps.find(
+    (step) => step.id === selectedStepId,
+  );
   const sessionViewState = getSessionViewState(currentWorkflow);
   const isRecording = sessionViewState === "recording";
+  const panelBadgeLabel = getPanelBadgeLabel(sessionViewState);
   const missingDescriptionCount =
-    currentWorkflow?.steps.filter((step) => step.description.trim().length === 0).length ?? 0;
+    currentWorkflow?.steps.filter(
+      (step) => step.description.trim().length === 0,
+    ).length ?? 0;
 
   useAutoScroll(stepsBottomRef.current, currentWorkflow?.steps.length ?? 0);
 
@@ -296,8 +341,11 @@ export function App() {
           return null;
         }
 
-        const nextWorkflow = nextState.workflowsById[nextState.currentWorkflowId];
-        return nextWorkflow?.steps.some((step) => step.id === currentId) ? currentId : null;
+        const nextWorkflow =
+          nextState.workflowsById[nextState.currentWorkflowId];
+        return nextWorkflow?.steps.some((step) => step.id === currentId)
+          ? currentId
+          : null;
       });
     });
   }
@@ -307,7 +355,7 @@ export function App() {
 
     const handleStorageChange = (
       changes: Record<string, chrome.storage.StorageChange>,
-      areaName: string
+      areaName: string,
     ) => {
       if (areaName === "local" && changes.workflowBuddyState) {
         void refreshState();
@@ -347,13 +395,15 @@ export function App() {
     if (!currentWorkflow) return;
 
     setSessionError(null);
-    const currentIndex = currentWorkflow.steps.findIndex((step) => step.id === stepId);
+    const currentIndex = currentWorkflow.steps.findIndex(
+      (step) => step.id === stepId,
+    );
     if (currentIndex === -1) return;
 
     await sendMessage({
       type: "DELETE_STEP",
       workflowId: currentWorkflow.id,
-      stepId
+      stepId,
     });
 
     if (selectedStepId === stepId) {
@@ -376,7 +426,7 @@ export function App() {
         type: "ATTACH_SCREENSHOT",
         workflowId: currentWorkflow.id,
         stepId: selectedStep.id,
-        screenshot
+        screenshot,
       });
 
       if (!response) {
@@ -393,7 +443,9 @@ export function App() {
 
     const tabId = await getActiveTabId();
     if (tabId == null) {
-      setSessionError("No active browser tab is available for screenshot capture.");
+      setSessionError(
+        "No active browser tab is available for screenshot capture.",
+      );
       return;
     }
 
@@ -405,7 +457,7 @@ export function App() {
         type: "CAPTURE_SCREENSHOT",
         workflowId: currentWorkflow.id,
         stepId: selectedStep.id,
-        tabId
+        tabId,
       });
 
       if (
@@ -459,7 +511,7 @@ export function App() {
     if (!trimmed) return;
 
     const createdWorkflow = workflowSchema.parse(
-      await sendMessage({ type: "CREATE_WORKFLOW", name: trimmed })
+      await sendMessage({ type: "CREATE_WORKFLOW", name: trimmed }),
     );
 
     const tabId = await getActiveTabId();
@@ -471,7 +523,7 @@ export function App() {
     const startResponse = await sendMessage({
       type: "START_RECORDING",
       workflowId: createdWorkflow.id,
-      tabId
+      tabId,
     });
     setSessionError(getStartErrorMessage(startResponse));
 
@@ -492,7 +544,7 @@ export function App() {
     const startResponse = await sendMessage({
       type: "START_RECORDING",
       workflowId: workflow.id,
-      tabId
+      tabId,
     });
     setSessionError(getStartErrorMessage(startResponse));
     await refreshState();
@@ -504,7 +556,7 @@ export function App() {
     setSessionError(null);
     await sendMessage({
       type: "STOP_RECORDING",
-      workflowId: currentWorkflow.id
+      workflowId: currentWorkflow.id,
     });
     await refreshState();
   }
@@ -515,7 +567,7 @@ export function App() {
     setSessionError(null);
     const exportResponse = await sendMessage({
       type: "EXPORT_WORKFLOW",
-      workflowId: currentWorkflow.id
+      workflowId: currentWorkflow.id,
     });
 
     if (
@@ -540,7 +592,9 @@ export function App() {
   async function persistStepDraft(stepId: string) {
     if (!currentWorkflow) return;
 
-    const currentStep = currentWorkflow.steps.find((step) => step.id === stepId);
+    const currentStep = currentWorkflow.steps.find(
+      (step) => step.id === stepId,
+    );
     if (!currentStep) return;
 
     const nextDescription = description.trim();
@@ -570,7 +624,7 @@ export function App() {
       type: "UPDATE_STEP",
       workflowId: currentWorkflow.id,
       stepId,
-      patch
+      patch,
     });
     await refreshState();
   }
@@ -601,7 +655,7 @@ export function App() {
     setSessionError(null);
     await sendMessage({
       type: "DELETE_WORKFLOW",
-      workflowId: currentWorkflow.id
+      workflowId: currentWorkflow.id,
     });
     reset({ workflowName: "" });
     setSelectedStepId(null);
@@ -641,7 +695,10 @@ export function App() {
       const target = event.target as Node | null;
       if (!target) return;
 
-      if (target instanceof Element && target.closest("[data-step-card='true']")) {
+      if (
+        target instanceof Element &&
+        target.closest("[data-step-card='true']")
+      ) {
         return;
       }
 
@@ -667,7 +724,13 @@ export function App() {
       document.removeEventListener("click", handleDocumentClick);
       document.removeEventListener("keydown", handleDocumentKeydown);
     };
-  }, [selectedStepId, description, failureNotes, currentWorkflow, selectedStep]);
+  }, [
+    selectedStepId,
+    description,
+    failureNotes,
+    currentWorkflow,
+    selectedStep,
+  ]);
 
   return (
     <div className="grain min-h-screen bg-transparent px-4 py-5 text-[color:var(--foreground)]">
@@ -681,13 +744,10 @@ export function App() {
               <div className="space-y-1">
                 <CardTitle className="text-[18px]">Workflow Buddy</CardTitle>
                 <CardDescription>
-                  Keep this panel open while you record. Capture stays narrow, readable, and ready for export.
+                  Keep this panel open while you record. Capture stays narrow,
+                  readable, and ready for export.
                 </CardDescription>
               </div>
-              <Badge variant={getSessionBadgeVariant(sessionViewState)}>
-                {isRecording ? <span className="mr-0.5 inline-block size-[5px] rounded-full bg-current opacity-90" /> : null}
-                {formatSessionLabel(sessionViewState)}
-              </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -695,7 +755,9 @@ export function App() {
               <div
                 className={cn(
                   "relative overflow-hidden rounded-[16px] border bg-[color:var(--panel-strong)] p-4 before:pointer-events-none before:absolute before:inset-0 before:rounded-[16px] before:bg-[linear-gradient(135deg,rgba(218,108,67,0.08)_0%,transparent_60%)]",
-                  isRecording ? "recording-pulse border-[color:var(--accent-border)]" : "border-[color:var(--line)]"
+                  isRecording
+                    ? "recording-pulse border-[color:var(--accent-border)]"
+                    : "border-[color:var(--line)]",
                 )}
               >
                 <div className="relative z-10 flex items-start justify-between gap-3">
@@ -707,12 +769,15 @@ export function App() {
                       {currentWorkflow.name}
                     </p>
                     <p className="[font-family:var(--font-mono)] mt-1 text-[11px] leading-[1.4] text-[color:var(--muted-foreground)]">
-                      Started {formatClock(currentWorkflow.createdAt)} · {currentWorkflow.steps.length} step
+                      Started {formatClock(currentWorkflow.createdAt)} ·{" "}
+                      {currentWorkflow.steps.length} step
                       {currentWorkflow.steps.length === 1 ? "" : "s"} captured
                     </p>
                   </div>
                   <Badge variant={getSessionBadgeVariant(sessionViewState)}>
-                    {isRecording ? <span className="mr-0.5 inline-block size-[5px] rounded-full bg-current opacity-90" /> : null}
+                    {isRecording ? (
+                      <span className="mr-0.5 inline-block size-[5px] rounded-full bg-current opacity-90" />
+                    ) : null}
                     {formatSessionLabel(sessionViewState)}
                   </Badge>
                 </div>
@@ -734,26 +799,36 @@ export function App() {
               </NoticeCard>
             ) : null}
 
-            {!sessionError && currentWorkflow && currentWorkflow.steps.length > 0 && missingDescriptionCount > 0 ? (
+            {!sessionError &&
+            currentWorkflow &&
+            currentWorkflow.steps.length > 0 &&
+            missingDescriptionCount > 0 ? (
               <NoticeCard tone="warning" title="Missing Descriptions">
-                {missingDescriptionCount} step{missingDescriptionCount === 1 ? "" : "s"} still need narrative context before export.
+                {missingDescriptionCount} step
+                {missingDescriptionCount === 1 ? "" : "s"} still need narrative
+                context before export.
               </NoticeCard>
             ) : null}
 
             {sessionViewState === "idle" ? (
-              <form className="space-y-3" onSubmit={handleSubmit(handleCreateWorkflow)} noValidate>
+              <form
+                className="space-y-3"
+                onSubmit={handleSubmit(handleCreateWorkflow)}
+                noValidate
+              >
                 <div className="space-y-1.5">
                   <FieldLabel>Workflow Name</FieldLabel>
                   <Input
                     aria-invalid={errors.workflowName ? "true" : "false"}
                     className={cn(
                       errors.workflowName &&
-                        "border-[color:var(--error-border)] focus-visible:border-[color:var(--error-border)] focus-visible:shadow-[0_0_0_3px_rgba(167,54,31,0.12)]"
+                        "border-[color:var(--error-border)] focus-visible:border-[color:var(--error-border)] focus-visible:shadow-[0_0_0_3px_rgba(167,54,31,0.12)]",
                     )}
                     placeholder="Login and submit support ticket"
                     {...register("workflowName", {
                       validate: (value) =>
-                        value.trim().length > 0 || "You need to enter a workflow name before recording."
+                        value.trim().length > 0 ||
+                        "You need to enter a workflow name before recording.",
                     })}
                   />
                   {errors.workflowName ? (
@@ -770,7 +845,9 @@ export function App() {
 
             {sessionViewState === "draft" ? (
               <div className="grid grid-cols-2 gap-2">
-                <Button onClick={() => void handleStartRecording()}>Start Recording</Button>
+                <Button onClick={() => void handleStartRecording()}>
+                  Start Recording
+                </Button>
                 <Button variant="ghost" onClick={handleDiscardWorkflow}>
                   Discard
                 </Button>
@@ -778,14 +855,20 @@ export function App() {
             ) : null}
 
             {sessionViewState === "recording" ? (
-              <Button className="w-full" variant="stop" onClick={handleStopRecording}>
+              <Button
+                className="w-full"
+                variant="stop"
+                onClick={handleStopRecording}
+              >
                 Stop Recording
               </Button>
             ) : null}
 
             {sessionViewState === "completed-empty" ? (
               <div className="grid grid-cols-2 gap-2">
-                <Button onClick={() => void handleStartRecording()}>Resume Recording</Button>
+                <Button onClick={() => void handleStartRecording()}>
+                  Resume Recording
+                </Button>
                 <Button variant="ghost" onClick={handleDiscardWorkflow}>
                   Discard
                 </Button>
@@ -794,10 +877,18 @@ export function App() {
 
             {sessionViewState === "completed-ready" ? (
               <div className="space-y-2">
-                <Button className="w-full" variant="outline" onClick={handleExport}>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={handleExport}
+                >
                   Export as Markdown
                 </Button>
-                <Button className="w-full" variant="ghost" onClick={handleDiscardWorkflow}>
+                <Button
+                  className="w-full"
+                  variant="ghost"
+                  onClick={handleDiscardWorkflow}
+                >
                   New Workflow
                 </Button>
               </div>
@@ -812,7 +903,8 @@ export function App() {
             </p>
             <CardTitle className="text-[18px]">Captured Steps</CardTitle>
             <CardDescription>
-              Click any step to annotate it in place without leaving the full list.
+              Click any step to annotate it in place without leaving the full
+              list.
             </CardDescription>
           </CardHeader>
           <CardContent className="py-4">
@@ -823,7 +915,8 @@ export function App() {
                     const isActiveRow = selectedStepId === step.id;
                     const hasFailureNotes = Boolean(step.failureNotes?.trim());
                     const hasScreenshot = Boolean(step.screenshotId);
-                    const isDescriptionEmpty = step.description.trim().length === 0;
+                    const isDescriptionEmpty =
+                      step.description.trim().length === 0;
                     const stepScreenshot = step.screenshotId
                       ? storageState.screenshotsById[step.screenshotId]
                       : null;
@@ -836,7 +929,7 @@ export function App() {
                           "overflow-hidden rounded-[16px] border transition-[border-color,background-color,box-shadow] duration-150",
                           isActiveRow
                             ? "border-[color:var(--accent-border)] bg-[color:var(--accent-muted)] shadow-[0_2px_6px_rgba(218,108,67,0.06)]"
-                            : "border-[rgba(62,46,31,0.12)] bg-[rgba(255,252,247,0.62)] hover:border-[color:var(--line)] hover:bg-[rgba(239,228,213,0.38)]"
+                            : "border-[rgba(62,46,31,0.12)] bg-[rgba(255,252,247,0.62)] hover:border-[color:var(--line)] hover:bg-[rgba(239,228,213,0.38)]",
                         )}
                       >
                         <div className="flex items-start gap-2 px-[14px] py-3">
@@ -860,7 +953,7 @@ export function App() {
                                 "pl-7 text-[13px] leading-[1.5]",
                                 isDescriptionEmpty
                                   ? "italic text-[color:var(--muted-foreground)]"
-                                  : "text-[color:var(--foreground)]"
+                                  : "text-[color:var(--foreground)]",
                               )}
                             >
                               {getStepHeading(step)}
@@ -875,8 +968,14 @@ export function App() {
                             ) : null}
 
                             <div className="flex flex-wrap gap-1 pl-7 pt-[6px]">
-                              <AnnotationChip active={hasFailureNotes} label="⚑ note" />
-                              <AnnotationChip active={hasScreenshot} label="◫ screenshot" />
+                              <AnnotationChip
+                                active={hasFailureNotes}
+                                label="⚑ note"
+                              />
+                              <AnnotationChip
+                                active={hasScreenshot}
+                                label="◫ screenshot"
+                              />
                             </div>
 
                             <p className="[font-family:var(--font-mono)] mt-[5px] truncate pl-7 text-[10px] text-[color:var(--muted-foreground)]">
@@ -904,7 +1003,9 @@ export function App() {
                               <Textarea
                                 ref={descriptionRef}
                                 value={description}
-                                onChange={(event) => setDescription(event.target.value)}
+                                onChange={(event) =>
+                                  setDescription(event.target.value)
+                                }
                                 className="min-h-[92px] rounded-[10px] px-3 py-[9px] text-[13px]"
                                 placeholder="What is this step doing and why…"
                               />
@@ -921,12 +1022,14 @@ export function App() {
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => setIsNotesExpanded((current) => !current)}
+                                  onClick={() =>
+                                    setIsNotesExpanded((current) => !current)
+                                  }
                                   className={cn(
                                     "[font-family:var(--font-mono)] inline-flex items-center gap-[6px] rounded-[6px] border px-[10px] py-[5px] text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors",
                                     isNotesExpanded
                                       ? "border-[color:var(--accent-border)] bg-[color:var(--typed-value-bg)] text-[color:var(--typed-value-fg)]"
-                                      : "border-[color:var(--line)] bg-[color:var(--background)] text-[color:var(--muted-foreground)] hover:border-[rgba(62,46,31,0.25)] hover:bg-[color:var(--panel-strong)] hover:text-[color:var(--foreground)]"
+                                      : "border-[color:var(--line)] bg-[color:var(--background)] text-[color:var(--muted-foreground)] hover:border-[rgba(62,46,31,0.25)] hover:bg-[color:var(--panel-strong)] hover:text-[color:var(--foreground)]",
                                   )}
                                 >
                                   <span>⚑</span>
@@ -934,12 +1037,16 @@ export function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setIsScreenshotExpanded((current) => !current)}
+                                  onClick={() =>
+                                    setIsScreenshotExpanded(
+                                      (current) => !current,
+                                    )
+                                  }
                                   className={cn(
                                     "[font-family:var(--font-mono)] inline-flex items-center gap-[6px] rounded-[6px] border px-[10px] py-[5px] text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors",
                                     isScreenshotExpanded
                                       ? "border-[color:var(--accent-border)] bg-[color:var(--typed-value-bg)] text-[color:var(--typed-value-fg)]"
-                                      : "border-[color:var(--line)] bg-[color:var(--background)] text-[color:var(--muted-foreground)] hover:border-[rgba(62,46,31,0.25)] hover:bg-[color:var(--panel-strong)] hover:text-[color:var(--foreground)]"
+                                      : "border-[color:var(--line)] bg-[color:var(--background)] text-[color:var(--muted-foreground)] hover:border-[rgba(62,46,31,0.25)] hover:bg-[color:var(--panel-strong)] hover:text-[color:var(--foreground)]",
                                   )}
                                 >
                                   <span>◫</span>
@@ -949,10 +1056,14 @@ export function App() {
 
                               {isNotesExpanded ? (
                                 <div className="space-y-1.5">
-                                  <FieldLabel optional>Failure Notes</FieldLabel>
+                                  <FieldLabel optional>
+                                    Failure Notes
+                                  </FieldLabel>
                                   <Textarea
                                     value={failureNotes}
-                                    onChange={(event) => setFailureNotes(event.target.value)}
+                                    onChange={(event) =>
+                                      setFailureNotes(event.target.value)
+                                    }
                                     className="min-h-[78px] rounded-[10px] px-3 py-[9px] text-[13px]"
                                     placeholder="What might go wrong at this step…"
                                   />
@@ -967,10 +1078,14 @@ export function App() {
                                       variant="outline"
                                       size="sm"
                                       disabled={isAttachingScreenshot}
-                                      onClick={() => void handleCaptureScreenshot()}
+                                      onClick={() =>
+                                        void handleCaptureScreenshot()
+                                      }
                                     >
                                       <Camera className="size-3.5" />
-                                      {isAttachingScreenshot ? "Capturing..." : "Capture Current Tab"}
+                                      {isAttachingScreenshot
+                                        ? "Capturing..."
+                                        : "Capture Current Tab"}
                                     </Button>
                                   </div>
                                   <input
@@ -988,14 +1103,19 @@ export function App() {
                                   <div
                                     tabIndex={0}
                                     onPaste={(event) => {
-                                      const file = getImageFileFromClipboard(event.clipboardData);
+                                      const file = getImageFileFromClipboard(
+                                        event.clipboardData,
+                                      );
                                       if (!file) return;
                                       event.preventDefault();
                                       void handleScreenshotFile(file);
                                     }}
                                     className="rounded-[10px] border-[1.5px] border-dashed border-[rgba(62,46,31,0.18)] px-4 py-4 text-center transition-colors hover:border-[rgba(218,108,67,0.3)] hover:bg-[rgba(218,108,67,0.03)] focus-visible:border-[rgba(218,108,67,0.35)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(218,108,67,0.12)]"
                                   >
-                                    <label htmlFor={screenshotInputId} className="block cursor-pointer">
+                                    <label
+                                      htmlFor={screenshotInputId}
+                                      className="block cursor-pointer"
+                                    >
                                       <p className="text-[12px] italic text-[color:var(--muted-foreground)]">
                                         Paste an image here, or click to upload
                                       </p>
@@ -1036,7 +1156,8 @@ export function App() {
 
                             <div className="flex items-center justify-end pt-1">
                               <p className="[font-family:var(--font-mono)] text-right text-[9px] uppercase tracking-[0.12em] text-[rgba(119,106,93,0.65)]">
-                                Click the step again, click outside, press Esc, or press Cmd/Ctrl+Enter to save
+                                Click the step again, click outside, press Esc,
+                                or press Cmd/Ctrl+Enter to save
                               </p>
                             </div>
                           </div>
