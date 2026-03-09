@@ -27,67 +27,6 @@ const interactiveClickSelector = [
   "[role='menuitem']"
 ].join(", ");
 
-const blockedInteractiveSelector = [
-  interactiveClickSelector,
-  "[onclick]",
-  "[contenteditable='true']",
-  "[contenteditable='']"
-].join(", ");
-
-const workflowBuddyUiSelector = [
-  "[data-workflow-buddy-inline-annotation='true']",
-  "[data-workflow-buddy-inline-annotation-host='true']"
-].join(", ");
-
-export function getElementLabel(element: Element): string {
-  const tag = element.tagName.toLowerCase();
-  const ariaLabel = element.getAttribute("aria-label")?.trim();
-  const textContent = element.textContent?.replace(/\s+/g, " ").trim() ?? "";
-
-  if (tag === "button") {
-    return ariaLabel || (textContent ? `Button: ${textContent.slice(0, 48)}` : "Button");
-  }
-
-  if (tag === "a") {
-    if (ariaLabel) return ariaLabel;
-    if (textContent) return `Link: ${textContent.slice(0, 48)}`;
-    const href = element.getAttribute("href");
-    return href ? `Link: ${href.slice(0, 48)}` : "Link";
-  }
-
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    return (
-      ariaLabel ||
-      element.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ||
-      element.placeholder ||
-      element.name ||
-      `${element.type || "text"} input`
-    );
-  }
-
-  if (tag === "label") {
-    return textContent ? `Label: ${textContent.slice(0, 48)}` : "Label";
-  }
-
-  if (tag === "p") {
-    return textContent ? `Paragraph: ${textContent.slice(0, 48)}` : "Paragraph";
-  }
-
-  if (ariaLabel) return ariaLabel;
-  if (textContent) return `${tag}: ${textContent.slice(0, 48)}`;
-
-  return tag;
-}
-
-export function getBlockedInteractiveElement(target: EventTarget | null): Element | null {
-  if (!(target instanceof Element)) return null;
-  return target.closest(blockedInteractiveSelector);
-}
-
-export function isWorkflowBuddyUiElement(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(workflowBuddyUiSelector) !== null;
-}
-
 const transientClickCaptureSelector = [".ant-wave", ".wave-motion", ".wave-motion-appear", ".wave-motion-appear-active"].join(
   ", "
 );
@@ -102,10 +41,6 @@ function isBroadClickContainer(element: Element): boolean {
 }
 
 function resolveCandidateCaptureElement(candidate: Element): Element | null {
-  if (isWorkflowBuddyUiElement(candidate)) {
-    return null;
-  }
-
   const label = candidate.closest("label");
   if (label) return label;
 
@@ -173,10 +108,6 @@ function isTransientWrapper(parent: Element, child: Element, root: Element): boo
 }
 
 export function getCapturedElementHtml(element: Element): string {
-  if (isWorkflowBuddyUiElement(element)) {
-    return "";
-  }
-
   const clone = element.cloneNode(true);
   if (!(clone instanceof Element)) {
     return element.outerHTML;

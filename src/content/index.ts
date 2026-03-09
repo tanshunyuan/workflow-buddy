@@ -2,16 +2,11 @@ import { extensionMessageSchema, type ExtensionMessage } from "../shared/message
 import { createClickStepFromHtml } from "./captureClick.js";
 import { cacheStartingValue, createTypeStep } from "./captureType.js";
 import {
-  getBlockedInteractiveElement,
   getCapturedElementHtml,
   getClickFingerprint,
-  getElementLabel,
-  isWorkflowBuddyUiElement,
   resolveClickCaptureElementAtPoint,
   resolveClickCaptureElement
 } from "./dom.js";
-import { hideInlineAnnotationEditor, isInlineAnnotationEditorOpen, isInlineAnnotationEvent, showInlineAnnotationEditor } from "./inlineAnnotation.js";
-import type { WorkflowStep } from "../shared/types.js";
 
 declare global {
   interface Window {
@@ -30,7 +25,6 @@ let pendingClickCapture:
       clientX: number;
       clientY: number;
       captureElement: Element;
-      targetLabel: string;
       detail: number;
       startedAt: number;
       timeoutId: number;
@@ -43,11 +37,9 @@ let lastDispatchedClick:
       dispatchedAt: number;
     }
   | null = null;
-let pendingAnnotationStepId: string | null = null;
 
-async function sendCapturedStep(message: ExtensionMessage): Promise<WorkflowStep | null> {
-  const response = await chrome.runtime.sendMessage(message);
-  return response as WorkflowStep | null;
+async function sendCapturedStep(message: ExtensionMessage): Promise<void> {
+  await chrome.runtime.sendMessage(message);
 }
 
 function clearPendingClickCapture(): void {
@@ -90,10 +82,15 @@ async function flushPendingClickCapture(): Promise<void> {
     return;
   }
 
-  const { captureKey, clientX, clientY, captureElement, targetLabel, detail, startedAt } = pendingClickCapture;
+  const workflowId = activeWorkflowId;
+  const { captureKey, clientX, clientY, captureElement, detail, startedAt } = pendingClickCapture;
   clearPendingClickCapture();
 
   await waitForSettledClickState();
+
+  if (!isCaptureEnabled || activeWorkflowId !== workflowId) {
+    return;
+  }
 
   const settledCaptureElement = resolveSettledCaptureElement(clientX, clientY, captureElement) ?? captureElement;
   const captureHtml = getCapturedElementHtml(settledCaptureElement);
@@ -115,72 +112,14 @@ async function flushPendingClickCapture(): Promise<void> {
     dispatchedAt: startedAt
   };
 
-  const createdStep = await sendCapturedStep({
+  await sendCapturedStep({
     type: "STEP_CAPTURED",
-    workflowId: activeWorkflowId,
+    workflowId,
     step
   });
-
-  const anchorElement = document.contains(settledCaptureElement)
-    ? settledCaptureElement
-    : document.contains(captureElement)
-      ? captureElement
-      : null;
-
-  if (!createdStep || createdStep.action !== "click" || !anchorElement) {
-    return;
-  }
-
-  pendingAnnotationStepId = createdStep.id;
-  showInlineAnnotationEditor({
-    targetLabel,
-    anchorElement,
-    onSave: async (description) => {
-      if (!activeWorkflowId || !pendingAnnotationStepId) return;
-
-      await chrome.runtime.sendMessage({
-        type: "UPDATE_STEP",
-        workflowId: activeWorkflowId,
-        stepId: pendingAnnotationStepId,
-        patch: { description }
-      } satisfies ExtensionMessage);
-      pendingAnnotationStepId = null;
-    },
-    onCancel: () => {
-      pendingAnnotationStepId = null;
-    }
-  });
-}
-
-function scheduleFlushPendingClickCapture(): void {
-  void flushPendingClickCapture();
-}
-
-function shouldBlockInteraction(event: Event): boolean {
-  if (!isInlineAnnotationEditorOpen()) return false;
-  if (isInlineAnnotationEvent(event)) return false;
-  return getBlockedInteractiveElement(event.target) !== null;
-}
-
-function handlePointerDown(event: PointerEvent): void {
-  if (!shouldBlockInteraction(event)) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
 }
 
 function handleClick(event: MouseEvent): void {
-  if (isInlineAnnotationEvent(event) || isWorkflowBuddyUiElement(event.target)) {
-    return;
-  }
-
-  if (isInlineAnnotationEditorOpen() && !isInlineAnnotationEvent(event)) {
-    if (getBlockedInteractiveElement(event.target)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-    return;
-  }
-
   if (!isCaptureEnabled || !activeWorkflowId) return;
   const captureElement = resolveClickCaptureElement(event);
   if (!captureElement) return;
@@ -207,8 +146,7 @@ function handleClick(event: MouseEvent): void {
       clientX: event.clientX,
       clientY: event.clientY,
       captureElement,
-      targetLabel: getElementLabel(captureElement),
-      timeoutId: window.setTimeout(scheduleFlushPendingClickCapture, clickAggregationWindowMs)
+      timeoutId: window.setTimeout(() => void flushPendingClickCapture(), clickAggregationWindowMs)
     };
     return;
   }
@@ -219,22 +157,19 @@ function handleClick(event: MouseEvent): void {
     clientX: event.clientX,
     clientY: event.clientY,
     captureElement,
-    targetLabel: getElementLabel(captureElement),
     detail: event.detail,
     startedAt: event.timeStamp,
-    timeoutId: window.setTimeout(scheduleFlushPendingClickCapture, clickAggregationWindowMs)
+    timeoutId: window.setTimeout(() => void flushPendingClickCapture(), clickAggregationWindowMs)
   };
 }
 
 function handleFocusIn(event: FocusEvent): void {
   if (!isCaptureEnabled) return;
-  if (isInlineAnnotationEvent(event) || isWorkflowBuddyUiElement(event.target)) return;
   cacheStartingValue(fieldValueCache, event.target);
 }
 
 function handleBlur(event: FocusEvent): void {
   if (!isCaptureEnabled || !activeWorkflowId) return;
-  if (isInlineAnnotationEvent(event) || isWorkflowBuddyUiElement(event.target)) return;
   const step = createTypeStep(fieldValueCache, event.target);
   if (!step) return;
 
@@ -248,7 +183,6 @@ function handleBlur(event: FocusEvent): void {
 if (!window.__workflowBuddyRecorderRegistered__) {
   window.__workflowBuddyRecorderRegistered__ = true;
 
-  document.addEventListener("pointerdown", handlePointerDown, true);
   document.addEventListener("click", handleClick, true);
   document.addEventListener("focusin", handleFocusIn, true);
   document.addEventListener("blur", handleBlur, true);
@@ -267,8 +201,6 @@ if (!window.__workflowBuddyRecorderRegistered__) {
       activeWorkflowId = parsed.data.workflowId;
       clearPendingClickCapture();
       lastDispatchedClick = null;
-      pendingAnnotationStepId = null;
-      hideInlineAnnotationEditor();
     }
 
     if (parsed.data.type === "DISABLE_CAPTURE") {
@@ -277,8 +209,6 @@ if (!window.__workflowBuddyRecorderRegistered__) {
       activeWorkflowId = null;
       clearPendingClickCapture();
       lastDispatchedClick = null;
-      pendingAnnotationStepId = null;
-      hideInlineAnnotationEditor();
     }
   });
 }
