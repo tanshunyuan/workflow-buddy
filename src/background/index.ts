@@ -17,7 +17,7 @@ import {
   updateStep
 } from "./storage.js";
 import { cropScreenshotDataUrl } from "./cropScreenshot.js";
-import { exportWorkflowToMarkdown } from "./exportMarkdown.js";
+import { buildWorkflowExportZip } from "./exportZip.js";
 import {
   getRecordingSessionSnapshot,
   sendRecordingSessionEvent,
@@ -106,6 +106,21 @@ function toSafeFileSegment(value: string): string {
 function buildScreenshotName(workflowName: string, stepIndex: number): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `${toSafeFileSegment(workflowName)}-step-${String(stepIndex).padStart(2, "0")}-${stamp}.png`;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    const chunk = bytes.subarray(index, index + 0x8000);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  return `data:${mimeType};base64,${bytesToBase64(bytes)}`;
 }
 
 async function captureScreenshotForStep(
@@ -259,9 +274,9 @@ async function exportWorkflow(workflowId: string): Promise<void> {
     throw new Error("Workflow not found.");
   }
 
-  const markdown = exportWorkflowToMarkdown(workflow, state.screenshotsById);
-  const safeFilename = `${(workflow.name || "workflow").replace(/[\\/:*?"<>|]/g, "-")}.md`;
-  const url = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
+  const zipBytes = buildWorkflowExportZip(workflow, state.screenshotsById);
+  const safeFilename = `${(workflow.name || "workflow").replace(/[\\/:*?"<>|]/g, "-")}.zip`;
+  const url = bytesToDataUrl(zipBytes, "application/zip");
 
   const downloadId = await chrome.downloads.download({
     url,

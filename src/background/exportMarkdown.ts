@@ -1,5 +1,26 @@
 import type { StoredScreenshot, Workflow } from "../shared/types.js";
 
+const mimeTypeToExtension: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif"
+};
+
+function getScreenshotExtension(screenshot: StoredScreenshot): string {
+  const filenameMatch = screenshot.name.match(/\.([a-z0-9]+)$/i);
+  if (filenameMatch) {
+    return filenameMatch[1].toLowerCase();
+  }
+
+  return mimeTypeToExtension[screenshot.mimeType.toLowerCase()] ?? "png";
+}
+
+export function buildExportScreenshotPath(stepIndex: number, screenshot: StoredScreenshot): string {
+  return `images/step-${String(stepIndex).padStart(2, "0")}.${getScreenshotExtension(screenshot)}`;
+}
+
 export function exportWorkflowToMarkdown(
   workflow: Workflow,
   screenshotsById: Record<string, StoredScreenshot>
@@ -29,7 +50,12 @@ export function exportWorkflowToMarkdown(
     }
     if (step.screenshotId) {
       const screenshot = screenshotsById[step.screenshotId];
-      lines.push(`Screenshot: ${screenshot?.name ?? step.screenshotId}`);
+      if (screenshot) {
+        lines.push("Screenshot:");
+        lines.push(`![Step ${step.index} screenshot](./${buildExportScreenshotPath(step.index, screenshot)})`);
+      } else {
+        lines.push(`Screenshot: (Missing asset for ${step.screenshotId})`);
+      }
     }
     lines.push("");
   }
