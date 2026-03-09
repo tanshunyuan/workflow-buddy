@@ -168,7 +168,19 @@ export async function startRecording(workflowId: string, tabId: number): Promise
   return workflow;
 }
 
-export async function stopRecording(workflowId: string): Promise<Workflow | null> {
+export async function pauseRecording(workflowId: string): Promise<Workflow | null> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+  if (!workflow) return null;
+
+  workflow.status = "paused";
+  workflow.updatedAt = nowIso();
+  state.activeRecordingTabId = null;
+  await saveState(state);
+  return workflow;
+}
+
+export async function finishRecording(workflowId: string): Promise<Workflow | null> {
   const state = await getState();
   const workflow = state.workflowsById[workflowId];
   if (!workflow) return null;

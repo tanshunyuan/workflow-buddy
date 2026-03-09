@@ -5,6 +5,7 @@ type StableRecordingSessionState =
   | "idle"
   | "draft"
   | "recording"
+  | "paused"
   | "completedEmpty"
   | "completedReady";
 
@@ -22,9 +23,12 @@ type RecordingSessionEvent =
   | { type: "START_SUCCESS"; workflowId: string; tabId: number; stepCount: number }
   | { type: "START_FAILURE"; error: string }
   | { type: "STEP_CAPTURED"; workflowId: string }
-  | { type: "STOP_REQUEST" }
-  | { type: "STOP_SUCCESS"; stepCount: number }
-  | { type: "STOP_FAILURE"; error: string }
+  | { type: "PAUSE_REQUEST" }
+  | { type: "PAUSE_SUCCESS"; workflowId: string; stepCount: number }
+  | { type: "PAUSE_FAILURE"; error: string }
+  | { type: "FINISH_REQUEST" }
+  | { type: "FINISH_SUCCESS"; stepCount: number }
+  | { type: "FINISH_FAILURE"; error: string }
   | { type: "EXPORT_REQUEST" }
   | { type: "EXPORT_SUCCESS" }
   | { type: "EXPORT_FAILURE"; error: string }
@@ -60,6 +64,7 @@ const recordingSessionMachine = createMachine(
         { guard: "isIdleSync", target: ".idle", actions: "applySyncState" },
         { guard: "isDraftSync", target: ".draft", actions: "applySyncState" },
         { guard: "isRecordingSync", target: ".recording", actions: "applySyncState" },
+        { guard: "isPausedSync", target: ".paused", actions: "applySyncState" },
         { guard: "isCompletedEmptySync", target: ".completedEmpty", actions: "applySyncState" },
         { guard: "isCompletedReadySync", target: ".completedReady", actions: "applySyncState" }
       ],
@@ -93,13 +98,8 @@ const recordingSessionMachine = createMachine(
           },
           START_FAILURE: [
             {
-              guard: "wasCompletedReady",
-              target: "completedReady",
-              actions: "assignError"
-            },
-            {
-              guard: "wasCompletedEmpty",
-              target: "completedEmpty",
+              guard: "wasPaused",
+              target: "paused",
               actions: "assignError"
             },
             {
@@ -115,15 +115,43 @@ const recordingSessionMachine = createMachine(
             guard: "matchesWorkflow",
             actions: "incrementStepCount"
           },
-          STOP_REQUEST: {
-            target: "stopping",
-            actions: "prepareStop"
+          PAUSE_REQUEST: {
+            target: "pausing",
+            actions: "preparePause"
+          },
+          FINISH_REQUEST: {
+            target: "finishing",
+            actions: "prepareFinish"
           }
         }
       },
-      stopping: {
+      pausing: {
         on: {
-          STOP_SUCCESS: [
+          PAUSE_SUCCESS: {
+            target: "paused",
+            actions: "assignPausedSession"
+          },
+          PAUSE_FAILURE: {
+            target: "recording",
+            actions: "assignError"
+          }
+        }
+      },
+      paused: {
+        on: {
+          START_REQUEST: {
+            target: "starting",
+            actions: "prepareStartFromPaused"
+          },
+          FINISH_REQUEST: {
+            target: "finishing",
+            actions: "prepareFinish"
+          }
+        }
+      },
+      finishing: {
+        on: {
+          FINISH_SUCCESS: [
             {
               guard: "hasRecordedSteps",
               target: "completedReady",
@@ -134,26 +162,22 @@ const recordingSessionMachine = createMachine(
               actions: "assignCompletedStepCount"
             }
           ],
-          STOP_FAILURE: {
-            target: "recording",
-            actions: "assignError"
-          }
+          FINISH_FAILURE: [
+            {
+              guard: "wasPaused",
+              target: "paused",
+              actions: "assignError"
+            },
+            {
+              target: "recording",
+              actions: "assignError"
+            }
+          ]
         }
       },
-      completedEmpty: {
-        on: {
-          START_REQUEST: {
-            target: "starting",
-            actions: "prepareStartFromCompletedEmpty"
-          }
-        }
-      },
+      completedEmpty: {},
       completedReady: {
         on: {
-          START_REQUEST: {
-            target: "starting",
-            actions: "prepareStartFromCompletedReady"
-          },
           EXPORT_REQUEST: {
             target: "exporting",
             actions: "prepareExport"
@@ -210,13 +234,9 @@ const recordingSessionMachine = createMachine(
         error: () => null,
         previousStableState: () => "draft"
       }),
-      prepareStartFromCompletedEmpty: assign({
+      prepareStartFromPaused: assign({
         error: () => null,
-        previousStableState: () => "completedEmpty"
-      }),
-      prepareStartFromCompletedReady: assign({
-        error: () => null,
-        previousStableState: () => "completedReady"
+        previousStableState: () => "paused"
       }),
       assignStartedSession: assign(({ event }) => {
         if (event.type !== "START_SUCCESS") {
@@ -234,7 +254,8 @@ const recordingSessionMachine = createMachine(
       assignError: assign(({ event }) => {
         if (
           event.type !== "START_FAILURE" &&
-          event.type !== "STOP_FAILURE" &&
+          event.type !== "PAUSE_FAILURE" &&
+          event.type !== "FINISH_FAILURE" &&
           event.type !== "EXPORT_FAILURE"
         ) {
           return {};
@@ -247,12 +268,28 @@ const recordingSessionMachine = createMachine(
       incrementStepCount: assign({
         stepCount: ({ context }) => context.stepCount + 1
       }),
-      prepareStop: assign({
+      preparePause: assign({
         error: () => null,
         previousStableState: () => "recording"
       }),
+      assignPausedSession: assign(({ event, context }) => {
+        if (event.type !== "PAUSE_SUCCESS") {
+          return {};
+        }
+
+        return {
+          workflowId: event.workflowId,
+          tabId: null,
+          stepCount: event.stepCount,
+          error: null,
+          previousStableState: "paused" as const
+        };
+      }),
+      prepareFinish: assign({
+        error: () => null
+      }),
       assignCompletedStepCount: assign(({ event }) => {
-        if (event.type !== "STOP_SUCCESS") {
+        if (event.type !== "FINISH_SUCCESS") {
           return {};
         }
 
@@ -272,13 +309,13 @@ const recordingSessionMachine = createMachine(
       isIdleSync: ({ event }) => event.type === "SYNC" && event.status === "idle",
       isDraftSync: ({ event }) => event.type === "SYNC" && event.status === "draft",
       isRecordingSync: ({ event }) => event.type === "SYNC" && event.status === "recording",
+      isPausedSync: ({ event }) => event.type === "SYNC" && event.status === "paused",
       isCompletedEmptySync: ({ event }) => event.type === "SYNC" && event.status === "completedEmpty",
       isCompletedReadySync: ({ event }) => event.type === "SYNC" && event.status === "completedReady",
-      wasCompletedEmpty: ({ context }) => context.previousStableState === "completedEmpty",
-      wasCompletedReady: ({ context }) => context.previousStableState === "completedReady",
+      wasPaused: ({ context }) => context.previousStableState === "paused",
       matchesWorkflow: ({ context, event }) =>
         event.type === "STEP_CAPTURED" && context.workflowId !== null && event.workflowId === context.workflowId,
-      hasRecordedSteps: ({ event }) => event.type === "STOP_SUCCESS" && event.stepCount > 0
+      hasRecordedSteps: ({ event }) => event.type === "FINISH_SUCCESS" && event.stepCount > 0
     }
   }
 );
@@ -314,6 +351,16 @@ function deriveSyncState(storageState: RootStorage): Extract<RecordingSessionEve
       status: "recording",
       workflowId: workflow.id,
       tabId: storageState.activeRecordingTabId ?? workflow.tabId ?? null,
+      stepCount: workflow.steps.length
+    };
+  }
+
+  if (workflow.status === "paused") {
+    return {
+      type: "SYNC",
+      status: "paused",
+      workflowId: workflow.id,
+      tabId: workflow.tabId ?? null,
       stepCount: workflow.steps.length
     };
   }

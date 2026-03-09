@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const workflowStatusSchema = z.enum(["draft", "recording", "completed"]);
+export const workflowStatusSchema = z.enum(["draft", "recording", "paused", "completed"]);
 export const stepActionSchema = z.enum(["click", "type"]);
 
 export const storedScreenshotSchema = z.object({

@@ -11,9 +11,10 @@ import {
   detachScreenshot,
   deleteStep,
   deleteWorkflow,
+  finishRecording,
   getState,
+  pauseRecording,
   startRecording,
-  stopRecording,
   updateStep
 } from "./storage.js";
 import { cropScreenshotDataUrl } from "./cropScreenshot.js";
@@ -291,15 +292,16 @@ async function exportWorkflow(workflowId: string): Promise<void> {
 
 function canStartRecording(): boolean {
   const snapshot = getRecordingSessionSnapshot();
-  return (
-    snapshot.matches("draft") ||
-    snapshot.matches("completedEmpty") ||
-    snapshot.matches("completedReady")
-  );
+  return snapshot.matches("draft") || snapshot.matches("paused");
 }
 
-function canStopRecording(): boolean {
+function canPauseRecording(): boolean {
   return getRecordingSessionSnapshot().matches("recording");
+}
+
+function canFinishRecording(): boolean {
+  const snapshot = getRecordingSessionSnapshot();
+  return snapshot.matches("recording") || snapshot.matches("paused");
 }
 
 function canExportWorkflow(): boolean {
@@ -374,7 +376,7 @@ chrome.runtime.onMessage.addListener((
       }
       case "START_RECORDING": {
         if (!canStartRecording()) {
-          sendResponse({ ok: false, error: "Recording can only start from a draft or completed workflow." });
+          sendResponse({ ok: false, error: "Recording can only start from a draft or paused workflow." });
           return;
         }
 
@@ -402,21 +404,44 @@ chrome.runtime.onMessage.addListener((
         sendResponse({ ok: false, error: "Workflow not found." });
         return;
       }
-      case "STOP_RECORDING": {
-        if (!canStopRecording()) {
-          sendResponse({ ok: false, error: "No recording session is active." });
+      case "PAUSE_RECORDING": {
+        if (!canPauseRecording()) {
+          sendResponse({ ok: false, error: "Only an active recording can be paused." });
           return;
         }
 
-        sendRecordingSessionEvent({ type: "STOP_REQUEST" });
-        const workflow = await stopRecording(safeMessage.workflowId);
+        sendRecordingSessionEvent({ type: "PAUSE_REQUEST" });
+        const workflow = await pauseRecording(safeMessage.workflowId);
         if (workflow?.tabId !== undefined) {
           await sendMessageToTab(workflow.tabId, { type: "DISABLE_CAPTURE" });
         }
         if (workflow) {
-          sendRecordingSessionEvent({ type: "STOP_SUCCESS", stepCount: workflow.steps.length });
+          sendRecordingSessionEvent({
+            type: "PAUSE_SUCCESS",
+            workflowId: workflow.id,
+            stepCount: workflow.steps.length
+          });
         } else {
-          sendRecordingSessionEvent({ type: "STOP_FAILURE", error: "Workflow not found." });
+          sendRecordingSessionEvent({ type: "PAUSE_FAILURE", error: "Workflow not found." });
+        }
+        sendResponse(workflow);
+        return;
+      }
+      case "FINISH_RECORDING": {
+        if (!canFinishRecording()) {
+          sendResponse({ ok: false, error: "Only a recording in progress or paused session can be finished." });
+          return;
+        }
+
+        sendRecordingSessionEvent({ type: "FINISH_REQUEST" });
+        const workflow = await finishRecording(safeMessage.workflowId);
+        if (workflow?.tabId !== undefined && storageState.activeRecordingTabId != null) {
+          await sendMessageToTab(workflow.tabId, { type: "DISABLE_CAPTURE" });
+        }
+        if (workflow) {
+          sendRecordingSessionEvent({ type: "FINISH_SUCCESS", stepCount: workflow.steps.length });
+        } else {
+          sendRecordingSessionEvent({ type: "FINISH_FAILURE", error: "Workflow not found." });
         }
         sendResponse(workflow);
         return;

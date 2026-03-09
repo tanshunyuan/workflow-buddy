@@ -43,6 +43,7 @@ type SessionViewState =
   | "idle"
   | "draft"
   | "recording"
+  | "paused"
   | "completed-empty"
   | "completed-ready";
 
@@ -50,6 +51,7 @@ function getSessionViewState(workflow: Workflow | undefined): SessionViewState {
   if (!workflow) return "idle";
   if (workflow.status === "draft") return "draft";
   if (workflow.status === "recording") return "recording";
+  if (workflow.status === "paused") return "paused";
   if (workflow.status === "completed" && workflow.steps.length === 0)
     return "completed-empty";
   return "completed-ready";
@@ -117,8 +119,10 @@ function formatSessionLabel(viewState: SessionViewState): string {
       return "Draft";
     case "recording":
       return "Recording";
-    case "completed-empty":
+    case "paused":
       return "Paused";
+    case "completed-empty":
+      return "Completed";
     case "completed-ready":
       return "Completed";
     default:
@@ -132,6 +136,8 @@ function getPanelBadgeLabel(viewState: SessionViewState): string | null {
       return "Draft";
     case "recording":
       return "Recording";
+    case "paused":
+      return "Paused";
     default:
       return null;
   }
@@ -145,6 +151,8 @@ function getSessionBadgeVariant(
       return "default";
     case "recording":
       return "accent";
+    case "paused":
+      return "subtle";
     case "completed-empty":
     case "completed-ready":
       return "completed";
@@ -581,12 +589,23 @@ export function App() {
     await refreshState();
   }
 
-  async function handleStopRecording() {
+  async function handlePauseRecording() {
     if (!currentWorkflow) return;
 
     setSessionError(null);
     await sendMessage({
-      type: "STOP_RECORDING",
+      type: "PAUSE_RECORDING",
+      workflowId: currentWorkflow.id,
+    });
+    await refreshState();
+  }
+
+  async function handleFinishRecording() {
+    if (!currentWorkflow) return;
+
+    setSessionError(null);
+    await sendMessage({
+      type: "FINISH_RECORDING",
       workflowId: currentWorkflow.id,
     });
     await refreshState();
@@ -893,24 +912,35 @@ export function App() {
             ) : null}
 
             {sessionViewState === "recording" ? (
-              <Button
-                className="w-full"
-                variant="stop"
-                onClick={handleStopRecording}
-              >
-                Stop Recording
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={handlePauseRecording}>
+                  Pause
+                </Button>
+                <Button variant="stop" onClick={handleFinishRecording}>
+                  Finish Recording
+                </Button>
+              </div>
+            ) : null}
+
+            {sessionViewState === "paused" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => void handleStartRecording()}>
+                  Resume
+                </Button>
+                <Button variant="outline" onClick={handleFinishRecording}>
+                  Finish Recording
+                </Button>
+              </div>
             ) : null}
 
             {sessionViewState === "completed-empty" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <Button onClick={() => void handleStartRecording()}>
-                  Resume Recording
-                </Button>
-                <Button variant="ghost" onClick={handleDiscardWorkflow}>
-                  Discard
-                </Button>
-              </div>
+              <Button
+                className="w-full"
+                variant="ghost"
+                onClick={handleDiscardWorkflow}
+              >
+                New Workflow
+              </Button>
             ) : null}
 
             {sessionViewState === "completed-ready" ? (
