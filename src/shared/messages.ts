@@ -15,6 +15,8 @@ export const extensionMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("STEP_CAPTURED"), workflowId: z.string(), step: workflowStepDraftSchema }),
   z.object({ type: z.literal("UPDATE_STEP"), workflowId: z.string(), stepId: z.string(), patch: workflowStepPatchSchema }),
   z.object({ type: z.literal("CAPTURE_SCREENSHOT"), workflowId: z.string(), stepId: z.string(), tabId: z.number().int() }),
+  z.object({ type: z.literal("START_SCREENSHOT_ASSIST"), workflowId: z.string(), stepId: z.string(), tabId: z.number().int() }),
+  z.object({ type: z.literal("BEGIN_SCREENSHOT_ASSIST") }),
   z.object({ type: z.literal("ATTACH_SCREENSHOT"), workflowId: z.string(), stepId: z.string(), screenshot: storedScreenshotSchema }),
   z.object({ type: z.literal("DETACH_SCREENSHOT"), workflowId: z.string(), stepId: z.string() }),
   z.object({ type: z.literal("EXPORT_WORKFLOW"), workflowId: z.string() })

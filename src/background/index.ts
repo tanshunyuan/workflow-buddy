@@ -1,7 +1,8 @@
 import { createId } from "../shared/ids.js";
 import { extensionMessageSchema } from "../shared/messages.js";
-import { storedScreenshotSchema } from "../shared/schemas.js";
+import { screenshotAssistResponseSchema, storedScreenshotSchema } from "../shared/schemas.js";
 import { nowIso } from "../shared/time.js";
+import type { ScreenshotAssistResponse } from "../shared/types.js";
 import {
   appendStep,
   attachScreenshot,
@@ -15,6 +16,7 @@ import {
   stopRecording,
   updateStep
 } from "./storage.js";
+import { cropScreenshotDataUrl } from "./cropScreenshot.js";
 import { exportWorkflowToMarkdown } from "./exportMarkdown.js";
 import {
   getRecordingSessionSnapshot,
@@ -30,6 +32,26 @@ async function configureSidePanelBehavior(): Promise<void> {
 
 async function sendMessageToTab(tabId: number, message: unknown): Promise<void> {
   await chrome.tabs.sendMessage(tabId, message);
+}
+
+async function requestMessageFromTab<T>(tabId: number, message: unknown): Promise<T> {
+  return chrome.tabs.sendMessage(tabId, message) as Promise<T>;
+}
+
+async function waitForNextAnimationFrameInTab(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        })
+    });
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 async function pingContentScript(tabId: number): Promise<boolean> {
@@ -130,6 +152,89 @@ async function captureScreenshotForStep(
       name: buildScreenshotName(workflow.name, step.index),
       mimeType: "image/png",
       dataUrl,
+      createdAt: nowIso()
+    });
+
+    const attachedStep = await attachScreenshot(workflowId, stepId, screenshot);
+    if (!attachedStep) {
+      return { ok: false, error: "Screenshot could not be attached." };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Screenshot capture failed."
+    };
+  }
+}
+
+async function startScreenshotAssistForStep(
+  workflowId: string,
+  stepId: string,
+  tabId: number
+): Promise<{ ok: true } | { ok: false; error: string; canceled?: boolean }> {
+  const state = await getState();
+  const workflow = state.workflowsById[workflowId];
+  if (!workflow) {
+    return { ok: false, error: "Workflow not found." };
+  }
+
+  const step = workflow.steps.find((item) => item.id === stepId);
+  if (!step) {
+    return { ok: false, error: "Step not found." };
+  }
+
+  if (workflow.tabId != null && workflow.tabId !== tabId) {
+    return {
+      ok: false,
+      error: "Switch back to the recorded tab before capturing a screenshot."
+    };
+  }
+
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return { ok: false, error: "The recorded tab is no longer available." };
+  }
+
+  if (!tab.active) {
+    return {
+      ok: false,
+      error: "Activate the recorded tab before capturing a screenshot."
+    };
+  }
+
+  const readiness = await ensureContentScriptReady(tabId);
+  if (!readiness.ok) {
+    return readiness;
+  }
+
+  let assistResponse: ScreenshotAssistResponse;
+  try {
+    const rawResponse = await requestMessageFromTab<unknown>(tabId, { type: "BEGIN_SCREENSHOT_ASSIST" });
+    assistResponse = screenshotAssistResponseSchema.parse(rawResponse);
+  } catch {
+    return {
+      ok: false,
+      error: "The screenshot selection overlay could not start in this tab."
+    };
+  }
+
+  if (!assistResponse.ok) {
+    return assistResponse;
+  }
+
+  try {
+    await waitForNextAnimationFrameInTab(tabId);
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    const croppedDataUrl = await cropScreenshotDataUrl(dataUrl, assistResponse.selection);
+    const screenshot = storedScreenshotSchema.parse({
+      id: createId("shot"),
+      name: buildScreenshotName(workflow.name, step.index),
+      mimeType: "image/png",
+      dataUrl: croppedDataUrl,
       createdAt: nowIso()
     });
 
@@ -327,6 +432,10 @@ chrome.runtime.onMessage.addListener((
       }
       case "CAPTURE_SCREENSHOT": {
         sendResponse(await captureScreenshotForStep(safeMessage.workflowId, safeMessage.stepId, safeMessage.tabId));
+        return;
+      }
+      case "START_SCREENSHOT_ASSIST": {
+        sendResponse(await startScreenshotAssistForStep(safeMessage.workflowId, safeMessage.stepId, safeMessage.tabId));
         return;
       }
       case "ATTACH_SCREENSHOT": {

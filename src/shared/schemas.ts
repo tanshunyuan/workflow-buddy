@@ -11,6 +11,36 @@ export const storedScreenshotSchema = z.object({
   createdAt: z.string()
 });
 
+export const screenshotSelectionRectSchema = z.object({
+  x: z.number().finite().nonnegative(),
+  y: z.number().finite().nonnegative(),
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive()
+});
+
+export const screenshotSelectionViewportSchema = z.object({
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+  devicePixelRatio: z.number().finite().positive()
+});
+
+export const screenshotSelectionSchema = z.object({
+  rect: screenshotSelectionRectSchema,
+  viewport: screenshotSelectionViewportSchema
+});
+
+export const screenshotAssistResponseSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    selection: screenshotSelectionSchema
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: z.string(),
+    canceled: z.boolean().optional()
+  })
+]);
+
 export const workflowStepSchema = z.object({
   id: z.string(),
   index: z.number().int().positive(),

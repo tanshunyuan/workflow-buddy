@@ -7,6 +7,7 @@ import {
   resolveClickCaptureElementAtPoint,
   resolveClickCaptureElement
 } from "./dom.js";
+import { beginScreenshotAssist, cancelScreenshotAssist, isScreenshotAssistActive } from "./screenshotAssist.js";
 
 declare global {
   interface Window {
@@ -120,7 +121,7 @@ async function flushPendingClickCapture(): Promise<void> {
 }
 
 function handleClick(event: MouseEvent): void {
-  if (!isCaptureEnabled || !activeWorkflowId) return;
+  if (isScreenshotAssistActive() || !isCaptureEnabled || !activeWorkflowId) return;
   const captureElement = resolveClickCaptureElement(event);
   if (!captureElement) return;
 
@@ -164,12 +165,12 @@ function handleClick(event: MouseEvent): void {
 }
 
 function handleFocusIn(event: FocusEvent): void {
-  if (!isCaptureEnabled) return;
+  if (isScreenshotAssistActive() || !isCaptureEnabled) return;
   cacheStartingValue(fieldValueCache, event.target);
 }
 
 function handleBlur(event: FocusEvent): void {
-  if (!isCaptureEnabled || !activeWorkflowId) return;
+  if (isScreenshotAssistActive() || !isCaptureEnabled || !activeWorkflowId) return;
   const step = createTypeStep(fieldValueCache, event.target);
   if (!step) return;
 
@@ -205,10 +206,16 @@ if (!window.__workflowBuddyRecorderRegistered__) {
 
     if (parsed.data.type === "DISABLE_CAPTURE") {
       void flushPendingClickCapture();
+      cancelScreenshotAssist("Screenshot capture canceled because recording stopped.");
       isCaptureEnabled = false;
       activeWorkflowId = null;
       clearPendingClickCapture();
       lastDispatchedClick = null;
+    }
+
+    if (parsed.data.type === "BEGIN_SCREENSHOT_ASSIST") {
+      void beginScreenshotAssist().then(sendResponse);
+      return true;
     }
   });
 }

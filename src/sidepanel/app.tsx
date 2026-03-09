@@ -464,7 +464,7 @@ export function App() {
 
     try {
       const response = await sendMessage({
-        type: "CAPTURE_SCREENSHOT",
+        type: "START_SCREENSHOT_ASSIST",
         workflowId: currentWorkflow.id,
         stepId: selectedStep.id,
         tabId,
@@ -475,6 +475,7 @@ export function App() {
         response !== null &&
         "ok" in response &&
         response.ok === false &&
+        (!("canceled" in response) || response.canceled !== true) &&
         "error" in response &&
         typeof response.error === "string"
       ) {
@@ -1121,8 +1122,8 @@ export function App() {
                                     >
                                       <Camera className="size-3.5" />
                                       {isAttachingScreenshot
-                                        ? "Capturing..."
-                                        : "Capture Current Tab"}
+                                        ? "Selecting..."
+                                        : "Capture Area"}
                                     </Button>
                                   </div>
                                   <input
