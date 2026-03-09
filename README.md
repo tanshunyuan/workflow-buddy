@@ -19,7 +19,12 @@ It helps a user document a workflow by capturing ordered browser steps, raw targ
 - Supported actions: `click` and `type`
 - Raw event target HTML captured for each step
 - Manual screenshots stored locally in extension storage
-- Markdown export for downstream LLM use
+- Markdown ZIP export for downstream LLM use
+- PDF export for human review
+
+## Export Behavior
+
+After a successful export, Workflow Buddy clears the active session from extension storage. The MVP does not provide a workflow history or library view.
 
 ## Getting Started
 
@@ -41,3 +46,4 @@ npm run dev
 - Vite + CRXJS
 - XState for recording lifecycle state
 - Zod for shared runtime validation
+- JSZip and pdf-lib for export generation

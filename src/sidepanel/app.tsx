@@ -1268,7 +1268,7 @@ export function App() {
                       No steps recorded yet
                     </p>
                     <p className="[font-family:var(--font-mono)] mt-2 text-[10px] uppercase tracking-[0.14em] text-[rgba(119,106,93,0.55)]">
-                      Start recording to capture clicks and typed values
+                      Start recording to capture clicks and typed values where allowed
                     </p>
                   </div>
                 )}

@@ -1,7 +1,13 @@
 import { nowIso } from "../shared/time.js";
 import { workflowStepDraftSchema } from "../shared/schemas.js";
 import type { WorkflowStepDraft } from "../shared/types.js";
-import { getElementHtml, getFieldValue, isPasswordInput, isTextEntryTarget } from "./dom.js";
+import {
+  getElementHtml,
+  getFieldValue,
+  isPasswordInput,
+  isTextEntryTarget,
+  sanitizeTypedValueForCapture
+} from "./dom.js";
 
 export function cacheStartingValue(cache: WeakMap<Element, string>, target: EventTarget | null): void {
   if (!isTextEntryTarget(target) || isPasswordInput(target)) return;
@@ -25,6 +31,6 @@ export function createTypeStep(
     timestamp: nowIso(),
     pageUrl: window.location.href,
     elementHtml: getElementHtml(target),
-    typedValue: after
+    typedValue: sanitizeTypedValueForCapture(target, after)
   });
 }

@@ -491,7 +491,7 @@ chrome.runtime.onMessage.addListener((
         sendRecordingSessionEvent({ type: "EXPORT_REQUEST" });
         try {
           await exportWorkflow(safeMessage.workflowId, safeMessage.format);
-          const nextState = await clearCurrentWorkflow();
+          const nextState = await deleteWorkflow(safeMessage.workflowId);
           syncRecordingSessionActor(nextState);
           sendRecordingSessionEvent({ type: "EXPORT_SUCCESS" });
           sendResponse({ ok: true });

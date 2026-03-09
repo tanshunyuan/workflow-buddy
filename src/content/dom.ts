@@ -12,6 +12,17 @@ export function isPasswordInput(element: Element): boolean {
   return element instanceof HTMLInputElement && element.type === "password";
 }
 
+const redactedTypedValue = "[redacted sensitive value]";
+const sensitiveAutocompleteTokens = new Set([
+  "cc-csc",
+  "cc-number",
+  "current-password",
+  "new-password",
+  "one-time-code"
+]);
+const sensitiveFieldPattern =
+  /\b(pass(word|code)?|pin|otp|one[-\s]?time|verification|auth(entication)?|token|secret|cvv|cvc|security\s*code|ssn|social\s*security|tax\s*id)\b/i;
+
 const interactiveClickSelector = [
   "button",
   "label",
@@ -184,6 +195,47 @@ export function getCapturedElementHtml(element: Element): string {
 
 function normalizeFingerprintText(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function collectSensitiveFieldSignals(element: Element): string[] {
+  const signals = [
+    element.getAttribute("id"),
+    element.getAttribute("name"),
+    element.getAttribute("aria-label"),
+    element.getAttribute("placeholder")
+  ];
+
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    signals.push(element.autocomplete);
+  }
+
+  return signals
+    .map((value) => normalizeFingerprintText(value).replace(/[_-]+/g, " "))
+    .filter((value) => value.length > 0);
+}
+
+export function shouldRedactTypedValue(element: Element): boolean {
+  if (isPasswordInput(element)) {
+    return true;
+  }
+
+  const signals = collectSensitiveFieldSignals(element);
+
+  if (element instanceof HTMLInputElement) {
+    const autocomplete = normalizeFingerprintText(element.autocomplete);
+    if (sensitiveAutocompleteTokens.has(autocomplete)) {
+      return true;
+    }
+  }
+
+  return signals.some((signal) => sensitiveFieldPattern.test(signal));
+}
+
+export function sanitizeTypedValueForCapture(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  value: string
+): string {
+  return shouldRedactTypedValue(element) ? redactedTypedValue : value;
 }
 
 function getElementFingerprintPath(element: Element, maxDepth = 4): string {

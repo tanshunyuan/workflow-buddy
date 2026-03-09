@@ -76,6 +76,47 @@ function createEmptyState(): RootStorage {
   });
 }
 
+function isScreenshotReferenced(state: RootStorage, screenshotId: string): boolean {
+  return Object.values(state.workflowsById).some((workflow) =>
+    workflow.steps.some((step) => step.screenshotId === screenshotId)
+  );
+}
+
+function pruneScreenshots(state: RootStorage, screenshotIds: Iterable<string | undefined>): void {
+  for (const screenshotId of screenshotIds) {
+    if (!screenshotId) {
+      continue;
+    }
+
+    if (!isScreenshotReferenced(state, screenshotId)) {
+      delete state.screenshotsById[screenshotId];
+    }
+  }
+}
+
+export function deleteWorkflowFromState(state: RootStorage, workflowId: string): RootStorage {
+  const workflow = state.workflowsById[workflowId];
+
+  if (!workflow) {
+    return state;
+  }
+
+  if (state.currentWorkflowId === workflowId) {
+    state.currentWorkflowId = null;
+  }
+
+  if (state.activeRecordingTabId != null && workflow.tabId === state.activeRecordingTabId) {
+    state.activeRecordingTabId = null;
+  }
+
+  delete state.workflowsById[workflowId];
+  pruneScreenshots(
+    state,
+    workflow.steps.map((step) => step.screenshotId)
+  );
+  return state;
+}
+
 export async function getState(): Promise<RootStorage> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   return rootStorageSchema.parse(result[STORAGE_KEY] ?? createEmptyState());
@@ -113,21 +154,7 @@ export async function clearCurrentWorkflow(): Promise<RootStorage> {
 
 export async function deleteWorkflow(workflowId: string): Promise<RootStorage> {
   const state = await getState();
-  const workflow = state.workflowsById[workflowId];
-
-  if (!workflow) {
-    return state;
-  }
-
-  if (state.currentWorkflowId === workflowId) {
-    state.currentWorkflowId = null;
-  }
-
-  if (state.activeRecordingTabId != null && workflow.tabId === state.activeRecordingTabId) {
-    state.activeRecordingTabId = null;
-  }
-
-  delete state.workflowsById[workflowId];
+  deleteWorkflowFromState(state, workflowId);
   await saveState(state);
   return state;
 }
