@@ -10,11 +10,20 @@ interface HashableStepPayload {
   action: WorkflowStepDraft["action"];
   pageUrl: string;
   elementHtml: string;
+  clickFingerprint?: string;
   typedValue?: string;
 }
 
 async function hashStepPayload(payload: HashableStepPayload): Promise<string> {
-  const encoded = new TextEncoder().encode(JSON.stringify(payload));
+  const normalizedPayload =
+    payload.action === "click"
+      ? {
+          action: payload.action,
+          pageUrl: payload.pageUrl,
+          clickFingerprint: payload.clickFingerprint ?? payload.elementHtml
+        }
+      : payload;
+  const encoded = new TextEncoder().encode(JSON.stringify(normalizedPayload));
   const digest = await crypto.subtle.digest("SHA-256", encoded);
 
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -44,12 +53,14 @@ async function isRecentDuplicateClickStep(previousStep: WorkflowStep | undefined
     hashStepPayload({
       action: previousStep.action,
       pageUrl: previousStep.pageUrl,
-      elementHtml: previousStep.elementHtml
+      elementHtml: previousStep.elementHtml,
+      clickFingerprint: previousStep.clickFingerprint
     }),
     hashStepPayload({
       action: nextStep.action,
       pageUrl: nextStep.pageUrl,
-      elementHtml: nextStep.elementHtml
+      elementHtml: nextStep.elementHtml,
+      clickFingerprint: nextStep.clickFingerprint
     })
   ]);
 
@@ -186,6 +197,7 @@ export async function appendStep(workflowId: string, draft: WorkflowStepDraft): 
     timestamp: safeDraft.timestamp,
     pageUrl: safeDraft.pageUrl,
     elementHtml: safeDraft.elementHtml,
+    clickFingerprint: safeDraft.clickFingerprint,
     typedValue: safeDraft.typedValue,
     description: ""
   });

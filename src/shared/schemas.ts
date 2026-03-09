@@ -18,6 +18,7 @@ export const workflowStepSchema = z.object({
   timestamp: z.string(),
   pageUrl: z.string(),
   elementHtml: z.string(),
+  clickFingerprint: z.string().optional(),
   description: z.string(),
   failureNotes: z.string().optional(),
   typedValue: z.string().optional(),
@@ -46,6 +47,7 @@ export const workflowStepDraftSchema = z.object({
   timestamp: z.string(),
   pageUrl: z.string(),
   elementHtml: z.string(),
+  clickFingerprint: z.string().optional(),
   typedValue: z.string().optional()
 });
 

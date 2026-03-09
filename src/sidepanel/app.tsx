@@ -390,7 +390,7 @@ export function App() {
   }, [selectedStepId]);
 
   useEffect(() => {
-    if (!selectedStepId) return;
+    if (!selectedStepId || isRecording) return;
 
     const timer = window.setTimeout(() => {
       descriptionRef.current?.focus();
@@ -399,7 +399,7 @@ export function App() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedStepId]);
+  }, [selectedStepId, isRecording]);
 
   async function handleDeleteStep(stepId: string) {
     if (!currentWorkflow) return;
