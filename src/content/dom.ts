@@ -73,6 +73,61 @@ export function resolveClickCaptureElementAtPoint(clientX: number, clientY: numb
   return null;
 }
 
+function getSemanticRole(element: Element): string {
+  const explicitRole = normalizeFingerprintText(element.getAttribute("role"));
+  if (explicitRole) return explicitRole;
+
+  const tag = element.tagName.toLowerCase();
+  if (tag === "a" && element.hasAttribute("href")) return "link";
+  if (tag === "button") return "button";
+  if (tag === "select") return "select";
+  if (tag === "textarea") return "textarea";
+  if (tag === "label") return "label";
+
+  if (element instanceof HTMLInputElement) {
+    return normalizeFingerprintText(element.type) || "input";
+  }
+
+  return tag;
+}
+
+export function isSameClickCaptureTarget(originalElement: Element, candidateElement: Element): boolean {
+  if (originalElement === candidateElement) {
+    return true;
+  }
+
+  if (originalElement.contains(candidateElement) || candidateElement.contains(originalElement)) {
+    return true;
+  }
+
+  const originalFingerprint = getClickFingerprint(originalElement);
+  const candidateFingerprint = getClickFingerprint(candidateElement);
+  if (originalFingerprint === candidateFingerprint) {
+    return true;
+  }
+
+  const originalRole = getSemanticRole(originalElement);
+  const candidateRole = getSemanticRole(candidateElement);
+
+  if (originalRole !== candidateRole) {
+    return false;
+  }
+
+  const originalText = normalizeFingerprintText(originalElement.textContent);
+  const candidateText = normalizeFingerprintText(candidateElement.textContent);
+  if (originalText && candidateText && originalText === candidateText) {
+    return true;
+  }
+
+  const originalAriaLabel = normalizeFingerprintText(originalElement.getAttribute("aria-label"));
+  const candidateAriaLabel = normalizeFingerprintText(candidateElement.getAttribute("aria-label"));
+  if (originalAriaLabel && candidateAriaLabel && originalAriaLabel === candidateAriaLabel) {
+    return true;
+  }
+
+  return false;
+}
+
 export function resolveClickCaptureElement(event: MouseEvent): Element | null {
   const candidates: Element[] = [];
   candidates.push(...document.elementsFromPoint(event.clientX, event.clientY));

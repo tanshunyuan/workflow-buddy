@@ -4,6 +4,7 @@ import { cacheStartingValue, createTypeStep } from "./captureType.js";
 import {
   getCapturedElementHtml,
   getClickFingerprint,
+  isSameClickCaptureTarget,
   resolveClickCaptureElementAtPoint,
   resolveClickCaptureElement
 } from "./dom.js";
@@ -93,8 +94,12 @@ async function flushPendingClickCapture(): Promise<void> {
     return;
   }
 
-  const settledCaptureElement = resolveSettledCaptureElement(clientX, clientY, captureElement) ?? captureElement;
-  const captureHtml = getCapturedElementHtml(settledCaptureElement);
+  const settledCaptureElement = resolveSettledCaptureElement(clientX, clientY, captureElement);
+  const finalCaptureElement =
+    settledCaptureElement && isSameClickCaptureTarget(captureElement, settledCaptureElement)
+      ? settledCaptureElement
+      : captureElement;
+  const captureHtml = getCapturedElementHtml(finalCaptureElement);
   const step = createClickStepFromHtml(captureHtml, captureKey);
   if (!step) return;
 
