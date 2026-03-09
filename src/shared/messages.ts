@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { storedScreenshotSchema, workflowStepDraftSchema, workflowStepPatchSchema } from "./schemas.js";
+import { exportFormatSchema, storedScreenshotSchema, workflowStepDraftSchema, workflowStepPatchSchema } from "./schemas.js";
 
 export const extensionMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("GET_STATE") }),
@@ -20,7 +20,7 @@ export const extensionMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("BEGIN_SCREENSHOT_ASSIST") }),
   z.object({ type: z.literal("ATTACH_SCREENSHOT"), workflowId: z.string(), stepId: z.string(), screenshot: storedScreenshotSchema }),
   z.object({ type: z.literal("DETACH_SCREENSHOT"), workflowId: z.string(), stepId: z.string() }),
-  z.object({ type: z.literal("EXPORT_WORKFLOW"), workflowId: z.string() })
+  z.object({ type: z.literal("EXPORT_WORKFLOW"), workflowId: z.string(), format: exportFormatSchema })
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;

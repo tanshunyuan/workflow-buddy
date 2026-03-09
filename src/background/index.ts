@@ -2,7 +2,7 @@ import { createId } from "../shared/ids.js";
 import { extensionMessageSchema } from "../shared/messages.js";
 import { screenshotAssistResponseSchema, storedScreenshotSchema } from "../shared/schemas.js";
 import { nowIso } from "../shared/time.js";
-import type { ScreenshotAssistResponse } from "../shared/types.js";
+import type { ExportFormat, ScreenshotAssistResponse } from "../shared/types.js";
 import {
   appendStep,
   attachScreenshot,
@@ -18,12 +18,12 @@ import {
   updateStep
 } from "./storage.js";
 import { cropScreenshotDataUrl } from "./cropScreenshot.js";
-import { buildWorkflowExportZip } from "./exportZip.js";
 import {
   getRecordingSessionSnapshot,
   sendRecordingSessionEvent,
   syncRecordingSessionActor
 } from "./recordingSessionMachine.js";
+import { getWorkflowExporter } from "./export/getWorkflowExporter.js";
 
 async function configureSidePanelBehavior(): Promise<void> {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -96,17 +96,13 @@ async function ensureContentScriptReady(tabId: number): Promise<{ ok: true } | {
   };
 }
 
-function toSafeFileSegment(value: string): string {
-  return value
+function buildScreenshotName(workflowName: string, stepIndex: number): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${workflowName
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "workflow";
-}
-
-function buildScreenshotName(workflowName: string, stepIndex: number): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `${toSafeFileSegment(workflowName)}-step-${String(stepIndex).padStart(2, "0")}-${stamp}.png`;
+    .replace(/^-+|-+$/g, "") || "workflow"}-step-${String(stepIndex).padStart(2, "0")}-${stamp}.png`;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -268,20 +264,20 @@ async function startScreenshotAssistForStep(
   }
 }
 
-async function exportWorkflow(workflowId: string): Promise<void> {
+async function exportWorkflow(workflowId: string, format: ExportFormat): Promise<void> {
   const state = await getState();
   const workflow = state.workflowsById[workflowId];
   if (!workflow) {
     throw new Error("Workflow not found.");
   }
 
-  const zipBytes = buildWorkflowExportZip(workflow, state.screenshotsById);
-  const safeFilename = `${(workflow.name || "workflow").replace(/[\\/:*?"<>|]/g, "-")}.zip`;
-  const url = bytesToDataUrl(zipBytes, "application/zip");
+  const exporter = getWorkflowExporter(format);
+  const artifact = await exporter.export(workflow, state.screenshotsById);
+  const url = bytesToDataUrl(artifact.bytes, artifact.mimeType);
 
   const downloadId = await chrome.downloads.download({
     url,
-    filename: safeFilename,
+    filename: artifact.filename,
     saveAs: true
   });
 
@@ -494,7 +490,7 @@ chrome.runtime.onMessage.addListener((
 
         sendRecordingSessionEvent({ type: "EXPORT_REQUEST" });
         try {
-          await exportWorkflow(safeMessage.workflowId);
+          await exportWorkflow(safeMessage.workflowId, safeMessage.format);
           const nextState = await clearCurrentWorkflow();
           syncRecordingSessionActor(nextState);
           sendRecordingSessionEvent({ type: "EXPORT_SUCCESS" });

@@ -32,6 +32,7 @@ import {
 } from "@/shared/schemas";
 import { nowIso } from "@/shared/time";
 import type {
+  ExportFormat,
   RootStorage,
   StoredScreenshot,
   Workflow,
@@ -611,13 +612,14 @@ export function App() {
     await refreshState();
   }
 
-  async function handleExport() {
+  async function handleExport(format: ExportFormat) {
     if (!currentWorkflow) return;
 
     setSessionError(null);
     const exportResponse = await sendMessage({
       type: "EXPORT_WORKFLOW",
       workflowId: currentWorkflow.id,
+      format,
     });
 
     if (
@@ -945,13 +947,21 @@ export function App() {
 
             {sessionViewState === "completed-ready" ? (
               <div className="space-y-2">
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={handleExport}
-                >
-                  Export as Markdown
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() => void handleExport("markdown-zip")}
+                  >
+                    Export ZIP
+                  </Button>
+                  <Button
+                    className="w-full"
+                    onClick={() => void handleExport("pdf")}
+                  >
+                    Export PDF
+                  </Button>
+                </div>
                 <Button
                   className="w-full"
                   variant="ghost"

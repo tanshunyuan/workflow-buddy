@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type {
+  exportFormatSchema,
   rootStorageSchema,
   screenshotAssistResponseSchema,
   screenshotSelectionSchema,
@@ -14,6 +15,7 @@ import type {
 
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>;
 export type StepAction = z.infer<typeof stepActionSchema>;
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
 export type Workflow = z.infer<typeof workflowSchema>;
 export type WorkflowStep = z.infer<typeof workflowStepSchema>;
 export type StoredScreenshot = z.infer<typeof storedScreenshotSchema>;
